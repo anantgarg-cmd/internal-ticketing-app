@@ -274,7 +274,7 @@ function setWebAppUrlFromEditor() {
 
 // -------------------- Authentication and access --------------------
 
-function requireUser_() {
+function getVerifiedCompanyEmail_() {
   const email = lower_(Session.getActiveUser().getEmail());
   if (!email) {
     throw new Error('Your email could not be identified. Open this app using your company Google Workspace account. The deployment must be restricted to your organisation.');
@@ -282,7 +282,57 @@ function requireUser_() {
 
   const settings = getSettings_();
   const domain = lower_(settings.COMPANY_DOMAIN);
-  if (domain && !email.endsWith('@' + domain)) throw new Error('This application is restricted to the company domain.');
+  if (!domain) throw new Error('COMPANY_DOMAIN is not configured in the Settings sheet. Please contact the application administrator.');
+  if (!email.endsWith('@' + domain)) throw new Error('This application is restricted to the company domain.');
+  return email;
+}
+
+function getEntryState() {
+  const email = getVerifiedCompanyEmail_();
+  const row = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email);
+  if (!row) return { state: 'REGISTER', email };
+  if (!truthy_(row.Active)) {
+    return {
+      state: 'BLOCKED',
+      email,
+      message: 'Your access has been disabled. Please contact the application administrator.'
+    };
+  }
+  return {
+    state: 'ACTIVE',
+    email,
+    name: String(row.Name || email.split('@')[0]),
+    role: String(row.Role || '').toUpperCase()
+  };
+}
+
+function registerFirstTimeUser(payload) {
+  const email = getVerifiedCompanyEmail_();
+  if (!payload || typeof payload !== 'object') throw new Error('Registration details were not received. Please try again.');
+
+  const name = cleanText_(payload.name, 200);
+  if (name.length < 2) throw new Error('Full Name must contain at least two characters.');
+
+  const role = String(payload.role || '').trim().toUpperCase();
+  if (![APP.ROLES.SALES, APP.ROLES.POC].includes(role)) {
+    throw new Error('Choose either Sales or Tech/Product. ADMIN cannot be selected during registration.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const existing = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email);
+    if (!existing) {
+      appendObject_(APP.SHEETS.USERS, { Email: email, Name: name, Role: role, Active: true });
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  return getEntryState();
+}
+
+function requireUser_() {
+  const email = getVerifiedCompanyEmail_();
 
   const row = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email && truthy_(u.Active));
   if (!row) throw new Error('You do not have access yet. Ask the app administrator to add your email to the Users sheet.');
