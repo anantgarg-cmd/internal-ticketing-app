@@ -3,42 +3,58 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    :root{--bg:#f4f6f8;--card:#fff;--ink:#17202a;--muted:#667085;--line:#e4e7ec;--brand:#2251cc;--danger:#b42318;--warn:#b54708;--ok:#067647}
-    *{box-sizing:border-box} body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
-    header{background:#111827;color:white;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:20}
-    header h1{font-size:18px;margin:0}.user{font-size:13px;color:#d1d5db;text-align:right}
-    nav{background:white;border-bottom:1px solid var(--line);padding:0 20px;display:flex;gap:4px;position:sticky;top:54px;z-index:19}
-    nav button{border:0;background:transparent;padding:14px 16px;font-weight:700;color:#475467;cursor:pointer;border-bottom:3px solid transparent}
-    nav button.active{color:var(--brand);border-bottom-color:var(--brand)}
-    main{max-width:1280px;margin:20px auto;padding:0 16px}.page{display:none}.page.active{display:block}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
-    .card h2,.card h3{margin-top:0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-    label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}input,select,textarea{width:100%;padding:10px 12px;border:1px solid #cfd4dc;border-radius:8px;font:inherit;background:white}textarea{min-height:100px;resize:vertical}
-    .full{grid-column:1/-1}.hint{font-size:12px;color:var(--muted);margin-top:5px}.required:after{content:' *';color:var(--danger)}
-    .btn{border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer}.btn-primary{background:var(--brand);color:white}.btn-secondary{background:#eef2f6;color:#344054}.btn-danger{background:var(--danger);color:white}.btn:disabled{opacity:.5;cursor:not-allowed}
-    .actions{display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:18px}.summary{background:#eff4ff;border:1px solid #c7d7fe;border-radius:10px;padding:14px;display:flex;gap:24px;flex-wrap:wrap}.summary b{display:block;font-size:12px;color:#475467;margin-bottom:4px}.summary span{font-weight:700}
-    .badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:700;background:#eef2f6}.HIGH,.CRITICAL,.OVERDUE,.BREACHED{background:#fee4e2;color:#b42318}.MEDIUM,.Raised{background:#fef0c7;color:#b54708}.LOW,.Resolved,.MET{background:#dcfae6;color:#067647}.Investigating,.ON-TRACK{background:#dbeafe;color:#1d4ed8}
-    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;background:white;font-size:13px}th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}th{background:#f8fafc;color:#475467;position:sticky;top:0}tr.clickable{cursor:pointer}tr.clickable:hover{background:#f8fafc}.subject-cell{white-space:normal;min-width:260px;max-width:420px}
-    .filters{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:10px;margin-bottom:12px}.metric-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.metric{background:white;border:1px solid var(--line);border-radius:10px;padding:16px}.metric .value{font-size:28px;font-weight:800}.metric .label{font-size:12px;color:var(--muted);margin-top:5px}
-    .bar-row{display:flex;align-items:center;gap:10px;margin:8px 0}.bar-name{width:180px;font-size:13px}.bar{height:10px;background:#e5e7eb;border-radius:99px;flex:1;overflow:hidden}.bar>span{display:block;height:100%;background:#98a2b3}.bar-count{width:30px;text-align:right;font-weight:700}
-    .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:20px}.modal-backdrop.show{display:flex}.modal{background:white;border-radius:14px;max-width:780px;width:100%;max-height:90vh;overflow:auto;padding:22px}.modal h2{margin-top:0}.modal-header{display:flex;justify-content:space-between;gap:12px}.close{border:0;background:transparent;font-size:24px;cursor:pointer}.detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.detail{background:#f8fafc;border-radius:8px;padding:10px}.detail b{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px}.pre{white-space:pre-wrap;word-break:break-word;background:#f8fafc;border-radius:8px;padding:12px}.timeline{border-left:2px solid #d0d5dd;padding-left:16px;margin-left:5px}.timeline-item{margin:12px 0}.timeline-item small{color:var(--muted)}
-    .toast{position:fixed;right:18px;bottom:18px;z-index:100;background:#101828;color:white;padding:12px 16px;border-radius:9px;display:none;max-width:420px}.toast.show{display:block}.toast.error{background:var(--danger)}.empty{text-align:center;color:var(--muted);padding:30px}.spinner{display:inline-block;width:18px;height:18px;border:3px solid #ddd;border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-    .registration-card{max-width:600px;margin:40px auto}.radio-options{display:flex;gap:20px;flex-wrap:wrap}.radio-options label{font-weight:normal;margin:0}.radio-options input{width:auto;margin-right:6px}
-    @media(max-width:900px){.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.filters{grid-template-columns:1fr 1fr}.metric-grid{grid-template-columns:1fr 1fr}nav{overflow:auto}.full{grid-column:auto}}
-    @media(max-width:520px){main{margin-top:12px;padding:0 10px}.registration-card{margin:12px auto;padding:16px}.radio-options{flex-direction:column;gap:12px}.registration-card .actions{justify-content:stretch}.registration-card .btn{width:100%}}
+    /* 1. Design tokens */
+    :root{--sf-green:#008A71;--sf-yellow:#D5D226;--sf-black:#231F20;--sf-green-hover:#00715D;--sf-green-dark:#005A49;--sf-green-soft:#E8F5F1;--sf-green-soft-2:#D6EEE7;--sf-yellow-soft:#FAF9D5;--sf-yellow-bright:#FFED00;--sf-amber:#FFCC00;--sf-grey-700:#4B4B4D;--sf-grey-500:#808285;--sf-grey-300:#BCBEC0;--sf-grey-200:#E4E7E5;--sf-grey-100:#F4F6F5;--sf-white:#FFF;--danger:#B42318;--line:var(--sf-grey-200);--shadow:0 4px 18px rgba(35,31,32,.06)}
+    /* 2. Reset and base */
+    *{box-sizing:border-box}html{background:var(--sf-grey-100)}body{margin:0;min-width:0;font-family:"Montserrat",Arial,sans-serif;background:#f4f7f5;color:var(--sf-black);font-size:14px;line-height:1.5}button,input,select,textarea{font:inherit}a{color:var(--sf-green-dark);font-weight:700}h1,h2,h3,p{margin-top:0}h2{font-size:24px;line-height:1.25;margin-bottom:6px}:focus-visible{outline:3px solid rgba(0,138,113,.3);outline-offset:2px}
+    /* 3. App shell */
+    header{height:76px;background:var(--sf-black);color:white;padding:12px 24px 12px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;position:sticky;top:0;z-index:20;border-bottom:3px solid var(--sf-yellow)}.brand-title{position:relative;padding-left:16px}.brand-title:before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:4px;background:var(--sf-yellow);border-radius:4px}.brand-title h1{font-size:17px;margin:0;font-weight:800}.brand-title p{font-size:11px;color:#d8d7d7;margin:2px 0 0}.user{font-size:11px;color:#eee;text-align:right;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 14px;min-width:140px}.app-layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 76px)}
+    /* 4. Navigation */
+    nav{background:white;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:6px;position:sticky;top:76px;height:calc(100vh - 76px);z-index:19}nav:before{content:"WORKSPACE";font-size:10px;font-weight:800;letter-spacing:1.2px;color:var(--sf-grey-500);padding:4px 12px 8px}nav button{border:1px solid transparent;background:transparent;min-height:44px;padding:10px 12px;font-weight:700;font-size:13px;color:var(--sf-grey-700);cursor:pointer;border-radius:8px;text-align:left;transition:.15s}nav button:hover{background:var(--sf-grey-100);color:var(--sf-black)}nav button.active{color:var(--sf-green-dark);background:var(--sf-green-soft);border-color:var(--sf-green-soft-2)}
+    /* 5. Page structure */
+    main{width:100%;max-width:1440px;margin:0 auto;padding:28px 32px 48px;min-width:0}.page{display:none}.page.active{display:block}.page-intro{margin-bottom:20px}.page-intro p{color:var(--sf-grey-700);margin:0}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--sf-green-dark);font-weight:800;margin-bottom:8px}.section-heading{display:flex;gap:12px;align-items:flex-start;margin-bottom:18px}.section-number{width:28px;height:28px;flex:0 0 28px;border-radius:8px;background:var(--sf-green-soft);color:var(--sf-green-dark);display:grid;place-items:center;font-weight:800}.section-heading h3{margin:1px 0 2px}.section-heading p{margin:0;color:var(--sf-grey-700);font-size:12px}
+    /* 6. Cards */
+    .card,.form-section{background:white;border:1px solid var(--line);border-radius:12px;padding:24px;margin-bottom:16px;box-shadow:var(--shadow)}.card h2,.card h3{margin-top:0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.full{grid-column:1/-1}.hint{font-size:12px;color:var(--sf-grey-700);margin-top:6px}
+    /* 7. Forms */
+    label{font-size:12px;font-weight:700;display:block;margin-bottom:7px}.required:after{content:' *';color:var(--danger)}input,select,textarea{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--sf-grey-300);border-radius:8px;color:var(--sf-black);background:white;transition:.15s}input::placeholder,textarea::placeholder{color:#68686a}input:focus,select:focus,textarea:focus{outline:none;border-color:#008A71;box-shadow:0 0 0 3px rgba(0,138,113,.14)}input[readonly]{background:var(--sf-grey-100)}textarea{min-height:120px;resize:vertical}.radio-options,.segmented{display:flex;gap:12px;flex-wrap:wrap}.radio-options label,.segmented label{display:flex;align-items:center;gap:10px;min-height:52px;margin:0;padding:12px 16px;border:1px solid var(--sf-grey-300);border-radius:10px;font-weight:600;cursor:pointer;flex:1}.radio-options label:has(input:checked),.segmented label:has(input:checked){border-color:var(--sf-green);background:var(--sf-green-soft);color:var(--sf-green-dark);box-shadow:inset 0 0 0 1px var(--sf-green)}.radio-options input,.segmented input{width:18px;height:18px;min-height:0;margin:0;accent-color:var(--sf-green)}.upload-field{border:1px dashed var(--sf-grey-300);border-radius:10px;padding:16px;background:var(--sf-grey-100)}.upload-title{font-weight:800;color:var(--sf-green-dark);margin-bottom:5px}.upload-field input{height:auto;background:white;padding:8px}.file-name{font-size:12px;color:var(--sf-grey-700);margin-top:7px}.summary{position:relative;overflow:hidden;background:var(--sf-yellow-soft);border:1px solid #e7e49a;border-radius:12px;padding:16px;display:grid;grid-template-columns:repeat(3,1fr)}.summary:before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--sf-yellow)}.summary>div{padding:3px 18px;border-right:1px solid #ddd98a}.summary>div:last-child{border:0}.summary b{display:block;font-size:10px;color:var(--sf-grey-700);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px}.summary span{font-weight:800}
+    /* 8. Buttons */
+    .btn{border:1px solid transparent;border-radius:8px;min-height:44px;padding:10px 18px;font-weight:700;cursor:pointer;transition:.15s}.btn:hover{transform:translateY(-1px)}.btn-primary{background:var(--sf-green);color:white}.btn-primary:hover{background:var(--sf-green-hover)}.btn-secondary{background:white;color:var(--sf-grey-700);border-color:var(--sf-grey-300)}.btn-risk{background:#fff7e0;color:#713b00;border-color:#e9b949}.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}.actions{display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:20px}
+    /* 9. Tables */
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px;max-width:100%}table{width:100%;border-collapse:collapse;background:white;font-size:12px}th,td{padding:13px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}th{background:var(--sf-grey-100);color:var(--sf-grey-700);font-size:10px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0}tr.clickable{cursor:pointer;transition:.15s}tr.clickable:hover{background:var(--sf-green-soft)}.subject-cell{white-space:normal;min-width:260px;max-width:420px;font-weight:600}
+    /* 10. Badges */
+    .badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 9px;font-size:10px;font-weight:800;background:#eceeed;color:#414143}.badge:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.CRITICAL{background:#f7d8d5;color:#7f1d1d}.HIGH,.OVERDUE,.BREACHED{background:#fee4e2;color:#9d241b}.MEDIUM,.Raised{background:#fff0bd;color:#754000}.LOW,.Resolved,.MET{background:#dff4e8;color:#086b48}.Investigating,.ON-TRACK{background:var(--sf-green-soft-2);color:var(--sf-green-dark)}
+    /* 11. Dashboard */
+    .filters{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:10px;margin:18px 0;padding:16px;background:var(--sf-grey-100);border:1px solid var(--line);border-radius:10px}.metric-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.metric{position:relative;overflow:hidden;background:white;border:1px solid var(--line);border-radius:12px;padding:18px;min-height:112px}.metric:before{content:"";position:absolute;left:0;top:0;width:100%;height:4px;background:var(--sf-green)}.metric:nth-child(4):before{background:var(--danger)}.metric:nth-child(5):before{background:var(--sf-yellow)}.metric .value{font-size:30px;font-weight:800}.metric .label{font-size:11px;color:var(--sf-grey-700);margin-top:5px}.bar-row{display:flex;align-items:center;gap:10px;margin:12px 0}.bar-name{width:180px;font-size:12px}.bar{height:8px;background:var(--sf-grey-200);border-radius:99px;flex:1;overflow:hidden}.bar>span{display:block;height:100%;background:var(--sf-green)}.bar-count{width:30px;text-align:right;font-weight:800}
+    /* 12. Modals */
+    .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(35,31,32,.62);z-index:50;align-items:center;justify-content:center;padding:20px}.modal-backdrop.show{display:flex;animation:fadeIn .16s}.modal{background:white;border-radius:14px;max-width:860px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:0 24px 24px;box-shadow:0 18px 60px rgba(0,0,0,.22)}.modal-header{display:flex;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:2;background:white;padding:22px 0 16px;border-bottom:1px solid var(--line)}.modal-header h2{margin:0}.close{border:0;background:var(--sf-grey-100);font-size:24px;cursor:pointer;width:44px;height:44px;border-radius:8px}.detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.detail{background:var(--sf-grey-100);border:1px solid var(--line);border-radius:8px;padding:12px}.detail b{display:block;font-size:10px;color:var(--sf-grey-700);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}.pre{white-space:pre-wrap;word-break:break-word;background:var(--sf-grey-100);border:1px solid var(--line);border-radius:8px;padding:14px}.timeline{border-left:2px solid var(--sf-green-soft-2);padding-left:18px;margin-left:7px}.timeline-item{margin:16px 0}.timeline-item small{color:var(--sf-grey-700)}#duplicateModal .modal{max-width:680px;border-top:5px solid var(--sf-amber)}.duplicate-card{margin:10px 0;background:var(--sf-yellow-soft);border-color:#e4d77e}
+    /* 13. Toasts and states */
+    .toast{position:fixed;right:18px;bottom:18px;z-index:100;background:var(--sf-green-dark);color:white;padding:13px 17px;border-radius:9px;display:none;max-width:min(420px,calc(100vw - 36px));box-shadow:0 10px 30px rgba(0,0,0,.18)}.toast.show{display:block;animation:toastIn .16s}.toast.error{background:var(--danger)}.empty{text-align:center;color:var(--sf-grey-700);padding:36px 20px}.spinner{display:inline-block;width:18px;height:18px;border:3px solid rgba(128,130,133,.28);border-top-color:var(--sf-green);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle}.registration-card{max-width:620px;margin:36px auto;padding:32px;border-top:5px solid var(--sf-yellow)}.registration-copy{color:var(--sf-grey-700);margin-bottom:24px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeIn{from{opacity:0}}@keyframes toastIn{from{opacity:0;transform:translateY(8px)}}
+    /* 14. Responsive rules */
+    @media(max-width:1000px){.metric-grid{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(2,1fr)}.filters input:first-child{grid-column:1/-1}}
+    @media(max-width:800px){header{height:72px;padding:10px 16px}.brand-title h1{font-size:15px}.brand-title p{font-size:10px}.app-layout{display:block}nav{height:auto;position:sticky;top:72px;flex-direction:row;overflow-x:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line)}nav:before{display:none}nav button{flex:0 0 auto;text-align:center;min-width:120px}main{padding:22px 18px 40px}.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.full{grid-column:auto}.summary{grid-template-columns:1fr}.summary>div{border-right:0;border-bottom:1px solid #ddd98a;padding:10px 14px}.metric-grid{grid-template-columns:1fr 1fr}.form-section,.card{padding:20px}}
+    @media(max-width:520px){header{gap:8px}.user{min-width:0;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title{padding-left:10px}.brand-title p{display:none}main{padding:16px 10px 32px}.registration-card{margin:8px auto;padding:20px}.radio-options,.segmented{flex-direction:column}.filters{grid-template-columns:1fr}.filters input:first-child{grid-column:auto}.metric-grid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column-reverse}.actions .btn{width:100%}.modal-backdrop{padding:0}.modal{height:100vh;max-height:100vh;border-radius:0;padding:0 16px 18px}.bar-name{width:100px}.toast{right:10px;bottom:10px}}
+    /* 15. Reduced motion */
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
   </style>
 </head>
 <body>
 <header>
-  <h1>Internal Issue Ticketing System</h1>
+  <div class="brand-title"><h1>Internal Issue Ticketing System</h1><p>Sales to Tech/Product issue resolution</p></div>
   <div class="user" id="userInfo">Loading...</div>
 </header>
-<nav id="nav"></nav>
+<div class="app-layout">
+<nav id="nav" aria-label="Primary navigation"></nav>
 <main>
   <section id="registrationPage" class="page">
     <div class="card registration-card">
+      <div class="eyebrow">One-time setup</div>
       <h2>Welcome to the Internal Issue Ticketing System</h2>
+      <p class="registration-copy">Identify your team once so we can personalise the tools and ticket views available to you.</p>
       <form id="registrationForm">
         <div class="grid">
           <div class="full">
@@ -63,49 +79,23 @@
   </section>
 
   <section id="raisePage" class="page">
-    <div class="card">
-      <h2>Raise a ticket</h2>
-      <p class="hint">Priority and resolution SLA are decided automatically from the category.</p>
+    <div class="page-intro"><div class="eyebrow">New request</div><h2>Raise a ticket</h2><p>Share the client context and evidence Tech/Product needs to resolve the issue quickly.</p></div>
+    <div>
       <form id="ticketForm">
-        <div class="grid">
-          <div class="full">
-            <label class="required">Client status</label>
-            <div style="display:flex;gap:18px">
-              <label style="font-weight:normal"><input type="radio" name="clientMode" value="existing" checked style="width:auto"> Existing/onboarded client</label>
-              <label style="font-weight:normal"><input type="radio" name="clientMode" value="new" style="width:auto"> New/unonboarded client</label>
-            </div>
-          </div>
-          <div>
-            <label for="clientId" id="clientIdLabel" class="required">Client ID</label>
-            <input id="clientId" name="clientId" type="text" inputmode="numeric" maxlength="20" required>
-            <div class="hint" id="clientIdHint"></div>
-          </div>
-          <div>
-            <label for="clientName" class="required">Client name</label>
-            <input id="clientName" name="clientName" type="text" maxlength="200" placeholder="Enter the client or brand name" required>
-          </div>
-          <div>
-            <label for="clientType" class="required">Client type</label>
-            <select id="clientType" name="clientType" required><option value="">Select type</option><option>360</option><option>Regular</option></select>
-          </div>
-          <div>
-            <label for="categoryId" class="required">Category</label>
-            <select id="categoryId" name="categoryId"><option value="">Select category</option></select>
-          </div>
-          <div>
-            <label for="emailSubject" class="required">Email subject</label>
-            <input id="emailSubject" name="emailSubject" maxlength="300" placeholder="Paste the email subject">
-            <div class="hint">Used with client and category for the duplicate check.</div>
-          </div>
-          <div class="full">
-            <label for="issueDescription" class="required">Issue description</label>
-            <textarea id="issueDescription" name="issueDescription" maxlength="5000" placeholder="What happened, what was expected, and any important identifiers"></textarea>
-          </div>
+        <section class="form-section"><div class="section-heading"><span class="section-number">1</span><div><h3>Client details</h3><p>Identify the client and select the most relevant issue category.</p></div></div><div class="grid">
+          <div class="full"><label class="required">Client status</label><div class="segmented"><label><input type="radio" name="clientMode" value="existing" checked> Existing/onboarded client</label><label><input type="radio" name="clientMode" value="new"> New/unonboarded client</label></div></div>
+          <div><label for="clientId" id="clientIdLabel" class="required">Client ID</label><input id="clientId" name="clientId" type="text" inputmode="numeric" maxlength="20" placeholder="Enter the numeric client ID" required><div class="hint" id="clientIdHint"></div></div>
+          <div><label for="clientName" class="required">Client name</label><input id="clientName" name="clientName" type="text" maxlength="200" placeholder="Enter the client or brand name" required></div>
+          <div><label for="clientType" class="required">Client type</label><select id="clientType" name="clientType" required><option value="">Select type</option><option>360</option><option>Regular</option></select></div>
+          <div><label for="categoryId" class="required">Category</label><select id="categoryId" name="categoryId"><option value="">Select category</option></select></div>
+        </div></section>
+        <section class="form-section"><div class="section-heading"><span class="section-number">2</span><div><h3>Issue details</h3><p>Explain the issue clearly and add the identifiers needed to investigate.</p></div></div><div class="grid">
+          <div class="full"><label for="emailSubject" class="required">Email subject</label><input id="emailSubject" name="emailSubject" maxlength="300" placeholder="Paste the email subject"><div class="hint">Used with client and category for the duplicate check.</div></div>
+          <div class="full"><label for="issueDescription" class="required">Issue description</label><textarea id="issueDescription" name="issueDescription" maxlength="5000" placeholder="What happened, what was expected, and any important identifiers"></textarea></div>
           <div id="dynamicFields" class="full grid"></div>
-          <div class="full" id="slaSummary" style="display:none">
-            <div class="summary"><div><b>Priority</b><span id="summaryPriority"></span></div><div><b>Resolution SLA</b><span id="summarySla"></span></div><div><b>Approx. due time</b><span id="summaryDue"></span></div></div>
-          </div>
-        </div>
+        </div></section>
+        <section class="form-section"><div class="section-heading"><span class="section-number">3</span><div><h3>Evidence</h3><p>Add supporting files when the selected category requires evidence.</p></div></div><div id="evidenceFields"></div><div class="hint">Supported formats: PNG, JPG, PDF, TXT, JSON and ZIP. Maximum file size is controlled in Settings.</div></section>
+        <section class="form-section"><div class="section-heading"><span class="section-number">4</span><div><h3>Priority and SLA</h3><p>These commitments are calculated automatically from the selected category.</p></div></div><div id="slaSummary" style="display:none"><div class="summary"><div><b>Priority</b><span id="summaryPriority"></span></div><div><b>Resolution SLA</b><span id="summarySla"></span></div><div><b>Approx. due time</b><span id="summaryDue"></span></div></div></div></section>
         <input type="hidden" name="duplicateOverride" id="duplicateOverride" value="false">
         <input type="hidden" name="duplicateIds" id="duplicateIds" value="">
         <div class="actions"><button class="btn btn-primary" id="submitBtn" type="submit">Check and raise ticket</button></div>
@@ -113,14 +103,15 @@
     </div>
   </section>
 
-  <section id="myPage" class="page"><div class="card"><h2>My tickets</h2><p class="hint" id="myHint"></p><div id="myTickets"></div></div></section>
+  <section id="myPage" class="page"><div class="page-intro"><div class="eyebrow">Your activity</div><h2>My tickets</h2><p id="myHint"></p></div><div class="card"><div id="myTickets"></div></div></section>
 
-  <section id="queuePage" class="page"><div class="card"><h2>Shared ticket queue</h2><p class="hint">Default order: overdue first, then priority, then oldest.</p><div class="filters"><input id="qSearch" placeholder="Search ticket, client or subject"><select id="qStatus"><option value="OPEN">Open only</option><option value="">All statuses</option><option>Raised</option><option>Investigating</option><option>Resolved</option></select><select id="qPriority"><option value="">All priorities</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select><select id="qCategory"><option value="">All categories</option></select><select id="qSla"><option value="">All SLA states</option><option>OVERDUE</option><option>ON TRACK</option><option>MET</option><option>BREACHED</option></select></div><div id="queueTickets"></div></div></section>
+  <section id="queuePage" class="page"><div class="page-intro"><div class="eyebrow">Operations workbench</div><h2>Shared ticket queue</h2><p>Overdue issues appear first, followed by priority and oldest raised time.</p></div><div class="card"><div class="filters"><input id="qSearch" placeholder="Search ticket, client or subject"><select id="qStatus"><option value="OPEN">Open only</option><option value="">All statuses</option><option>Raised</option><option>Investigating</option><option>Resolved</option></select><select id="qPriority"><option value="">All priorities</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select><select id="qCategory"><option value="">All categories</option></select><select id="qSla"><option value="">All SLA states</option><option>OVERDUE</option><option>ON TRACK</option><option>MET</option><option>BREACHED</option></select></div><div id="queueTickets"></div></div></section>
 
   <section id="numbersPage" class="page"><div id="numbers"></div></section>
 </main>
+</div>
 
-<div class="modal-backdrop" id="duplicateModal"><div class="modal"><div class="modal-header"><h2>Possible duplicate found</h2><button class="close" onclick="closeModal('duplicateModal')">×</button></div><p>A similar ticket was raised recently for the same client and category.</p><div id="duplicateList"></div><div class="actions"><button class="btn btn-secondary" onclick="closeModal('duplicateModal')">Go back</button><button class="btn btn-primary" onclick="raiseDespiteDuplicate()">Raise anyway</button></div></div></div>
+<div class="modal-backdrop" id="duplicateModal"><div class="modal"><div class="modal-header"><h2>Possible duplicate found</h2><button class="close" onclick="closeModal('duplicateModal')">×</button></div><p>A similar ticket was raised recently for the same client and category.</p><div id="duplicateList"></div><div class="actions"><button class="btn btn-secondary" onclick="closeModal('duplicateModal')">Go back</button><button class="btn btn-risk" onclick="raiseDespiteDuplicate()">Raise anyway</button></div></div></div>
 <div class="modal-backdrop" id="detailModal"><div class="modal" id="detailContent"></div></div>
 <div class="toast" id="toast"></div>
 
@@ -217,14 +208,14 @@
   }
 
   function categoryChanged(){
-    const cat=BOOT.categories.find(c=>c.id===document.getElementById('categoryId').value), box=document.getElementById('dynamicFields'); box.innerHTML='';
+    const cat=BOOT.categories.find(c=>c.id===document.getElementById('categoryId').value), box=document.getElementById('dynamicFields'), evidenceBox=document.getElementById('evidenceFields'); box.innerHTML=''; evidenceBox.innerHTML='';
     if(!cat){document.getElementById('slaSummary').style.display='none';return;}
     cat.fields.forEach(key=>{
       const [label,type,placeholder]=FIELD_DEFS[key]||[key,'text','']; const required=cat.requiredFields.includes(key); let input='';
       if(type==='textarea') input=`<textarea name="${key}" placeholder="${escAttr(placeholder)}" ${required?'required':''}></textarea>`;
-      else if(type==='file') input=`<input type="file" name="attachment" accept=".png,.jpg,.jpeg,.pdf,.txt,.json,.zip" ${required?'required':''}><div class="hint">Maximum file size is controlled in Settings.</div>`;
+      else if(type==='file') input=`<div class="upload-field"><div class="upload-title">Upload evidence</div><div class="hint">PNG, JPG, PDF, TXT, JSON or ZIP · Maximum size is controlled in Settings.</div><input type="file" name="attachment" accept=".png,.jpg,.jpeg,.pdf,.txt,.json,.zip" aria-describedby="selectedFileName" ${required?'required':''} onchange="document.getElementById('selectedFileName').textContent=this.files[0]?.name||'No file selected'"><div class="file-name" id="selectedFileName">No file selected</div></div>`;
       else input=`<input type="${type}" name="${key}" placeholder="${escAttr(placeholder)}" ${required?'required':''}>`;
-      box.insertAdjacentHTML('beforeend',`<div class="${type==='textarea'?'full':''}"><label class="${required?'required':''}">${esc(label)}</label>${input}</div>`);
+      (type==='file'?evidenceBox:box).insertAdjacentHTML('beforeend',`<div class="${type==='textarea'?'full':''}"><label class="${required?'required':''}">${esc(label)}</label>${input}</div>`);
     });
     document.getElementById('summaryPriority').textContent=cat.priority; document.getElementById('summarySla').textContent=`${cat.slaHours} hours`;
     document.getElementById('summaryDue').textContent=new Date(Date.now()+cat.slaHours*3600000).toLocaleString('en-IN'); document.getElementById('slaSummary').style.display='block';
@@ -239,7 +230,7 @@
 
   function showDuplicates(matches){
     document.getElementById('duplicateIds').value=matches.map(x=>x.ticketId).join(',');
-    document.getElementById('duplicateList').innerHTML=matches.map(x=>`<div class="detail" style="margin:8px 0"><b>${esc(x.ticketId)} · ${esc(x.status)} · ${x.similarity}% similar</b><div>${esc(x.subject)}</div><small>${esc(x.createdAt)}${x.canView?' · You can view this ticket from your ticket list.':''}</small></div>`).join('');
+    document.getElementById('duplicateList').innerHTML=matches.map(x=>`<div class="detail duplicate-card"><b>${esc(x.ticketId)} · ${esc(x.status)} · ${x.similarity}% similar</b><div>${esc(x.subject)}</div><small>${esc(x.createdAt)}${x.canView?' · You can view this ticket from your ticket list.':''}</small></div>`).join('');
     openModal('duplicateModal');
   }
   function raiseDespiteDuplicate(){document.getElementById('duplicateOverride').value='true';closeModal('duplicateModal');actualSubmit();}
@@ -285,7 +276,7 @@
 
   function loadNumbers(){document.getElementById('numbers').innerHTML=loading();google.script.run.withSuccessHandler(renderNumbers).withFailureHandler(showError).getNumbers();}
   function renderNumbers(n){
-    document.getElementById('numbers').innerHTML=`<div class="card"><h2>Last ${n.days} days</h2><div class="metric-grid"><div class="metric"><div class="value">${n.raised}</div><div class="label">Tickets raised</div></div><div class="metric"><div class="value">${n.resolved}</div><div class="label">Tickets resolved</div></div><div class="metric"><div class="value">${n.open}</div><div class="label">Currently open</div></div><div class="metric"><div class="value">${n.overdue}</div><div class="label">Currently overdue</div></div><div class="metric"><div class="value">${n.adherence===null?'—':n.adherence+'%'}</div><div class="label">SLA adherence of resolved tickets</div></div></div></div><div class="grid"><div class="card"><h3>Open by priority</h3>${bars(n.byPriority)}</div><div class="card"><h3>Open by status</h3>${bars(n.byStatus)}</div><div class="card full"><h3>Open by category</h3>${bars(n.byCategory)}</div></div>`;
+    document.getElementById('numbers').innerHTML=`<div class="page-intro"><div class="eyebrow">Performance snapshot</div><h2>Numbers</h2><p>Operational health across the last ${n.days} days.</p></div><div class="card"><h3>Last ${n.days} days</h3><div class="metric-grid"><div class="metric"><div class="value">${n.raised}</div><div class="label">Tickets raised</div></div><div class="metric"><div class="value">${n.resolved}</div><div class="label">Tickets resolved</div></div><div class="metric"><div class="value">${n.open}</div><div class="label">Currently open</div></div><div class="metric"><div class="value">${n.overdue}</div><div class="label">Currently overdue</div></div><div class="metric"><div class="value">${n.adherence===null?'—':n.adherence+'%'}</div><div class="label">SLA adherence of resolved tickets</div></div></div></div><div class="grid"><div class="card"><h3>Open by priority</h3>${bars(n.byPriority)}</div><div class="card"><h3>Open by status</h3>${bars(n.byStatus)}</div><div class="card full"><h3>Open by category</h3>${bars(n.byCategory)}</div></div>`;
   }
   function bars(rows){const max=Math.max(1,...rows.map(x=>x.count));return rows.length?rows.map(x=>`<div class="bar-row"><div class="bar-name">${esc(x.name)}</div><div class="bar"><span style="width:${x.count/max*100}%"></span></div><div class="bar-count">${x.count}</div></div>`).join(''):'<div class="empty">No open tickets.</div>';}
 
