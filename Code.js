@@ -391,13 +391,14 @@ function resolveClient_(form, expectedClientType) {
   const mode = String(form.clientMode || '');
   const id = String(form.clientId == null ? '' : form.clientId).trim();
   const name = cleanText_(form.clientName, 200);
-  const type = String(form.clientType || '');
+  const expectedType = String(expectedClientType == null ? '' : expectedClientType).trim();
+  const type = String(form.clientType || '').trim();
   if (!['existing','new'].includes(mode)) throw new Error('Choose a valid client status.');
   if (!name) throw new Error('Client name is mandatory.');
   if (mode === 'existing' && !id) throw new Error('Client ID is mandatory for an existing client.');
   if (id && (!/^\d+$/.test(id) || id.length > 20)) throw new Error('Client ID must contain only digits and be no more than 20 characters.');
   if (!['360','Regular'].includes(type)) throw new Error('Choose 360 or Regular for the client.');
-  if (type !== expectedClientType) throw new Error('The selected category does not match the client type.');
+  if (type !== expectedType) throw new Error('The selected category does not match the client type.');
   return { mode: mode === 'existing' ? 'Existing' : 'New', id, name, type };
 }
 
