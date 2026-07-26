@@ -1,0 +1,70 @@
+name: Deploy Apps Script
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          chmod 600 "$HOME/.clasprc.json"
+
+      - name: Configure deployment
+        env:
+          CLASP_JSON_DEV: ${{ secrets.CLASP_JSON_DEV }}
+          CLASP_JSON_PROD: ${{ secrets.CLASP_JSON_PROD }}
+          DEPLOYMENT_ID_DEV: ${{ secrets.DEPLOYMENT_ID_DEV }}
+          DEPLOYMENT_ID_PROD: ${{ secrets.DEPLOYMENT_ID_PROD }}
+        run: |
+          if [[ "$GITHUB_REF_NAME" == "develop" ]]; then
+            printf '%s' "$CLASP_JSON_DEV" > .clasp.json
+            printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID_DEV" >> "$GITHUB_ENV"
+          else
+            printf '%s' "$CLASP_JSON_PROD" > .clasp.json
+            printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID_PROD" >> "$GITHUB_ENV"
+          fi
+
+      - name: Push Apps Script files
+        run: npx clasp push --force
+
+      - name: Create Apps Script version
+        id: version
+        run: |
+          output=$(npx clasp version "Automated deployment from ${GITHUB_SHA}")
+          version=$(printf '%s\n' "$output" | sed -nE 's/.*[Vv]ersion ([0-9]+).*/\1/p' | tail -n 1)
+          if [[ -z "$version" ]]; then
+            printf 'Unable to determine Apps Script version from clasp output.\n' >&2
+            exit 1
+          fi
+          printf 'number=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update existing deployment
+        run: >-
+          npx clasp deploy
+          --deploymentId "$DEPLOYMENT_ID"
+          --versionNumber "${{ steps.version.outputs.number }}"
+          --description "Automated deployment from ${GITHUB_SHA}"

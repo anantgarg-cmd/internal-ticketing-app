@@ -274,7 +274,7 @@ function setWebAppUrlFromEditor() {
 
 // -------------------- Authentication and access --------------------
 
-function requireUser_() {
+function getVerifiedCompanyEmail_() {
   const email = lower_(Session.getActiveUser().getEmail());
   if (!email) {
     throw new Error('Your email could not be identified. Open this app using your company Google Workspace account. The deployment must be restricted to your organisation.');
@@ -282,7 +282,57 @@ function requireUser_() {
 
   const settings = getSettings_();
   const domain = lower_(settings.COMPANY_DOMAIN);
-  if (domain && !email.endsWith('@' + domain)) throw new Error('This application is restricted to the company domain.');
+  if (!domain) throw new Error('COMPANY_DOMAIN is not configured in the Settings sheet. Please contact the application administrator.');
+  if (!email.endsWith('@' + domain)) throw new Error('This application is restricted to the company domain.');
+  return email;
+}
+
+function getEntryState() {
+  const email = getVerifiedCompanyEmail_();
+  const row = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email);
+  if (!row) return { state: 'REGISTER', email };
+  if (!truthy_(row.Active)) {
+    return {
+      state: 'BLOCKED',
+      email,
+      message: 'Your access has been disabled. Please contact the application administrator.'
+    };
+  }
+  return {
+    state: 'ACTIVE',
+    email,
+    name: String(row.Name || email.split('@')[0]),
+    role: String(row.Role || '').toUpperCase()
+  };
+}
+
+function registerFirstTimeUser(payload) {
+  const email = getVerifiedCompanyEmail_();
+  if (!payload || typeof payload !== 'object') throw new Error('Registration details were not received. Please try again.');
+
+  const name = cleanText_(payload.name, 200);
+  if (name.length < 2) throw new Error('Full Name must contain at least two characters.');
+
+  const role = String(payload.role || '').trim().toUpperCase();
+  if (![APP.ROLES.SALES, APP.ROLES.POC].includes(role)) {
+    throw new Error('Choose either Sales or Tech/Product. ADMIN cannot be selected during registration.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const existing = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email);
+    if (!existing) {
+      appendObject_(APP.SHEETS.USERS, { Email: email, Name: name, Role: role, Active: true });
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  return getEntryState();
+}
+
+function requireUser_() {
+  const email = getVerifiedCompanyEmail_();
 
   const row = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email && truthy_(u.Active));
   if (!row) throw new Error('You do not have access yet. Ask the app administrator to add your email to the Users sheet.');
@@ -302,10 +352,17 @@ function requireRole_(roles) {
 
 function validateDuplicatePayload_(payload) {
   if (!payload) throw new Error('Ticket data is missing.');
+  const mode = String(payload.clientMode || '');
+  const clientId = String(payload.clientId == null ? '' : payload.clientId).trim();
+  const clientName = cleanText_(payload.clientName, 200);
+  const clientType = String(payload.clientType || '');
+  if (!['existing','new'].includes(mode)) throw new Error('Choose a valid client status.');
+  if (!clientName) throw new Error('Client name is mandatory.');
+  if (!['360','Regular'].includes(clientType)) throw new Error('Choose 360 or Regular for the client.');
+  if (mode === 'existing' && !clientId) throw new Error('Client ID is mandatory for an existing client.');
+  if (clientId && (!/^\d+$/.test(clientId) || clientId.length > 20)) throw new Error('Client ID must contain only digits and be no more than 20 characters.');
   if (!cleanText_(payload.emailSubject, 300)) throw new Error('Email subject is mandatory.');
   if (!payload.categoryId) throw new Error('Category is mandatory.');
-  if (payload.clientMode === 'existing' && !payload.clientId) throw new Error('Choose an existing client.');
-  if (payload.clientMode === 'new' && !cleanText_(payload.newClientName, 200)) throw new Error('Enter the new client name.');
 }
 
 function validateTicketForm_(form, category, client) {
@@ -331,20 +388,18 @@ function validateTicketForm_(form, category, client) {
 }
 
 function resolveClient_(form, expectedClientType) {
-  const mode = String(form.clientMode || 'existing');
-  if (mode === 'existing') {
-    const client = getActiveClients_().find(c => String(c.id) === String(form.clientId));
-    if (!client) throw new Error('The selected client was not found or is inactive.');
-    if (client.type !== expectedClientType) throw new Error('The selected category does not match the client type.');
-    return { mode: 'Existing', id: client.id, name: client.name, type: client.type };
-  }
-
-  const name = cleanText_(form.newClientName, 200);
-  const type = String(form.newClientType || '');
-  if (!name) throw new Error('New client name is mandatory.');
-  if (!['360','Regular'].includes(type)) throw new Error('Choose 360 or Regular for the new client.');
-  if (type !== expectedClientType) throw new Error('The selected category does not match the new client type.');
-  return { mode: 'New', id: '', name, type };
+  const mode = String(form.clientMode || '');
+  const id = String(form.clientId == null ? '' : form.clientId).trim();
+  const name = cleanText_(form.clientName, 200);
+  const expectedType = String(expectedClientType == null ? '' : expectedClientType).trim();
+  const type = String(form.clientType || '').trim();
+  if (!['existing','new'].includes(mode)) throw new Error('Choose a valid client status.');
+  if (!name) throw new Error('Client name is mandatory.');
+  if (mode === 'existing' && !id) throw new Error('Client ID is mandatory for an existing client.');
+  if (id && (!/^\d+$/.test(id) || id.length > 20)) throw new Error('Client ID must contain only digits and be no more than 20 characters.');
+  if (!['360','Regular'].includes(type)) throw new Error('Choose 360 or Regular for the client.');
+  if (type !== expectedType) throw new Error('The selected category does not match the client type.');
+  return { mode: mode === 'existing' ? 'Existing' : 'New', id, name, type };
 }
 
 // -------------------- Attachments --------------------
@@ -594,13 +649,15 @@ function extractDynamicFields_(form, category) {
 // -------------------- Duplicate matching --------------------
 
 function buildClientKeyFromPayload_(payload) {
-  if (payload.clientMode === 'existing') return `ID:${String(payload.clientId)}`;
-  return `NEW:${String(payload.newClientType)}:${normalizeSubject_(payload.newClientName)}`;
+  const clientId = String(payload.clientId == null ? '' : payload.clientId).trim();
+  if (clientId) return `ID:${clientId}`;
+  return `NAME:${String(payload.clientType)}:${normalizeSubject_(payload.clientName)}`;
 }
 
 function buildClientKeyFromTicket_(ticket) {
-  if (String(ticket.Client_Mode).toLowerCase() === 'existing' && ticket.Client_ID) return `ID:${String(ticket.Client_ID)}`;
-  return `NEW:${String(ticket.Client_Type)}:${normalizeSubject_(ticket.Client_Name)}`;
+  const clientId = String(ticket.Client_ID == null ? '' : ticket.Client_ID).trim();
+  if (clientId) return `ID:${clientId}`;
+  return `NAME:${String(ticket.Client_Type)}:${normalizeSubject_(ticket.Client_Name)}`;
 }
 
 function normalizeSubject_(value) {
