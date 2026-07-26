@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root{--bg:#f4f6f8;--card:#fff;--ink:#17202a;--muted:#667085;--line:#e4e7ec;--brand:#2251cc;--danger:#b42318;--warn:#b54708;--ok:#067647}
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
+    header{background:#111827;color:white;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:20}
+    header h1{font-size:18px;margin:0}.user{font-size:13px;color:#d1d5db;text-align:right}
+    nav{background:white;border-bottom:1px solid var(--line);padding:0 20px;display:flex;gap:4px;position:sticky;top:54px;z-index:19}
+    nav button{border:0;background:transparent;padding:14px 16px;font-weight:700;color:#475467;cursor:pointer;border-bottom:3px solid transparent}
+    nav button.active{color:var(--brand);border-bottom-color:var(--brand)}
+    main{max-width:1280px;margin:20px auto;padding:0 16px}.page{display:none}.page.active{display:block}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+    .card h2,.card h3{margin-top:0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}input,select,textarea{width:100%;padding:10px 12px;border:1px solid #cfd4dc;border-radius:8px;font:inherit;background:white}textarea{min-height:100px;resize:vertical}
+    .full{grid-column:1/-1}.hint{font-size:12px;color:var(--muted);margin-top:5px}.required:after{content:' *';color:var(--danger)}
+    .btn{border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer}.btn-primary{background:var(--brand);color:white}.btn-secondary{background:#eef2f6;color:#344054}.btn-danger{background:var(--danger);color:white}.btn:disabled{opacity:.5;cursor:not-allowed}
+    .actions{display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:18px}.summary{background:#eff4ff;border:1px solid #c7d7fe;border-radius:10px;padding:14px;display:flex;gap:24px;flex-wrap:wrap}.summary b{display:block;font-size:12px;color:#475467;margin-bottom:4px}.summary span{font-weight:700}
+    .badge{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:700;background:#eef2f6}.HIGH,.CRITICAL,.OVERDUE,.BREACHED{background:#fee4e2;color:#b42318}.MEDIUM,.Raised{background:#fef0c7;color:#b54708}.LOW,.Resolved,.MET{background:#dcfae6;color:#067647}.Investigating,.ON-TRACK{background:#dbeafe;color:#1d4ed8}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;background:white;font-size:13px}th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}th{background:#f8fafc;color:#475467;position:sticky;top:0}tr.clickable{cursor:pointer}tr.clickable:hover{background:#f8fafc}.subject-cell{white-space:normal;min-width:260px;max-width:420px}
+    .filters{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:10px;margin-bottom:12px}.metric-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.metric{background:white;border:1px solid var(--line);border-radius:10px;padding:16px}.metric .value{font-size:28px;font-weight:800}.metric .label{font-size:12px;color:var(--muted);margin-top:5px}
+    .bar-row{display:flex;align-items:center;gap:10px;margin:8px 0}.bar-name{width:180px;font-size:13px}.bar{height:10px;background:#e5e7eb;border-radius:99px;flex:1;overflow:hidden}.bar>span{display:block;height:100%;background:#98a2b3}.bar-count{width:30px;text-align:right;font-weight:700}
+    .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center;padding:20px}.modal-backdrop.show{display:flex}.modal{background:white;border-radius:14px;max-width:780px;width:100%;max-height:90vh;overflow:auto;padding:22px}.modal h2{margin-top:0}.modal-header{display:flex;justify-content:space-between;gap:12px}.close{border:0;background:transparent;font-size:24px;cursor:pointer}.detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.detail{background:#f8fafc;border-radius:8px;padding:10px}.detail b{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:4px}.pre{white-space:pre-wrap;word-break:break-word;background:#f8fafc;border-radius:8px;padding:12px}.timeline{border-left:2px solid #d0d5dd;padding-left:16px;margin-left:5px}.timeline-item{margin:12px 0}.timeline-item small{color:var(--muted)}
+    .toast{position:fixed;right:18px;bottom:18px;z-index:100;background:#101828;color:white;padding:12px 16px;border-radius:9px;display:none;max-width:420px}.toast.show{display:block}.toast.error{background:var(--danger)}.empty{text-align:center;color:var(--muted);padding:30px}.spinner{display:inline-block;width:18px;height:18px;border:3px solid #ddd;border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:900px){.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.filters{grid-template-columns:1fr 1fr}.metric-grid{grid-template-columns:1fr 1fr}nav{overflow:auto}.full{grid-column:auto}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>Internal Issue Ticketing System</h1>
+  <div class="user" id="userInfo">Loading...</div>
+</header>
+<nav id="nav"></nav>
+<main>
+  <section id="raisePage" class="page">
+    <div class="card">
+      <h2>Raise a ticket</h2>
+      <p class="hint">Priority and resolution SLA are decided automatically from the category.</p>
+      <form id="ticketForm">
+        <div class="grid">
+          <div class="full">
+            <label class="required">Client selection</label>
+            <div style="display:flex;gap:18px">
+              <label style="font-weight:normal"><input type="radio" name="clientMode" value="existing" checked style="width:auto"> Existing client</label>
+              <label style="font-weight:normal"><input type="radio" name="clientMode" value="new" style="width:auto"> New client</label>
+            </div>
+          </div>
+          <div id="existingClientBox">
+            <label for="clientId" class="required">Client</label>
+            <select id="clientId" name="clientId"><option value="">Select client</option></select>
+          </div>
+          <div id="newClientNameBox" style="display:none">
+            <label for="newClientName" class="required">New client name</label>
+            <input id="newClientName" name="newClientName" maxlength="200" placeholder="Enter client name">
+          </div>
+          <div id="newClientTypeBox" style="display:none">
+            <label for="newClientType" class="required">New client type</label>
+            <select id="newClientType" name="newClientType"><option value="">Select type</option><option>360</option><option>Regular</option></select>
+          </div>
+          <div>
+            <label for="categoryId" class="required">Category</label>
+            <select id="categoryId" name="categoryId"><option value="">Select client first</option></select>
+          </div>
+          <div>
+            <label for="emailSubject" class="required">Email subject</label>
+            <input id="emailSubject" name="emailSubject" maxlength="300" placeholder="Paste the email subject">
+            <div class="hint">Used with client and category for the duplicate check.</div>
+          </div>
+          <div class="full">
+            <label for="issueDescription" class="required">Issue description</label>
+            <textarea id="issueDescription" name="issueDescription" maxlength="5000" placeholder="What happened, what was expected, and any important identifiers"></textarea>
+          </div>
+          <div id="dynamicFields" class="full grid"></div>
+          <div class="full" id="slaSummary" style="display:none">
+            <div class="summary"><div><b>Priority</b><span id="summaryPriority"></span></div><div><b>Resolution SLA</b><span id="summarySla"></span></div><div><b>Approx. due time</b><span id="summaryDue"></span></div></div>
+          </div>
+        </div>
+        <input type="hidden" name="duplicateOverride" id="duplicateOverride" value="false">
+        <input type="hidden" name="duplicateIds" id="duplicateIds" value="">
+        <div class="actions"><button class="btn btn-primary" id="submitBtn" type="submit">Check and raise ticket</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="myPage" class="page"><div class="card"><h2>My tickets</h2><p class="hint" id="myHint"></p><div id="myTickets"></div></div></section>
+
+  <section id="queuePage" class="page"><div class="card"><h2>Shared ticket queue</h2><p class="hint">Default order: overdue first, then priority, then oldest.</p><div class="filters"><input id="qSearch" placeholder="Search ticket, client or subject"><select id="qStatus"><option value="OPEN">Open only</option><option value="">All statuses</option><option>Raised</option><option>Investigating</option><option>Resolved</option></select><select id="qPriority"><option value="">All priorities</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select><select id="qCategory"><option value="">All categories</option></select><select id="qSla"><option value="">All SLA states</option><option>OVERDUE</option><option>ON TRACK</option><option>MET</option><option>BREACHED</option></select></div><div id="queueTickets"></div></div></section>
+
+  <section id="numbersPage" class="page"><div id="numbers"></div></section>
+</main>
+
+<div class="modal-backdrop" id="duplicateModal"><div class="modal"><div class="modal-header"><h2>Possible duplicate found</h2><button class="close" onclick="closeModal('duplicateModal')">×</button></div><p>A similar ticket was raised recently for the same client and category.</p><div id="duplicateList"></div><div class="actions"><button class="btn btn-secondary" onclick="closeModal('duplicateModal')">Go back</button><button class="btn btn-primary" onclick="raiseDespiteDuplicate()">Raise anyway</button></div></div></div>
+<div class="modal-backdrop" id="detailModal"><div class="modal" id="detailContent"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+  let BOOT = null, QUEUE = [], CURRENT_TICKET = null;
+  const FIELD_DEFS = {
+    awb:['AWB number','text','e.g. SF123456789'],order_id:['Order ID','text','Client/order reference'],endpoint:['API endpoint','text','e.g. /orders/create'],api_log:['API request/response or error log','textarea','Paste relevant logs; remove passwords and tokens'],label_type:['Label type','text','e.g. 4×6 PDF'],invoice_reference:['Invoice month/number','text','e.g. June 2026 / INV-123'],amount:['Amount','number','Enter amount'],expected_date:['Expected date','date',''],seller_id:['Seller ID','text',''],user_identifier:['Affected user email/mobile','text',''],origin_pincode:['Origin pincode','text','6-digit pincode'],destination_pincode:['Destination pincode','text','6-digit pincode'],service_type:['Service type','text','e.g. Surface/Air'],expected_status:['Expected status','text',''],actual_status:['Actual status received','text',''],wallet_reference:['Wallet/transaction reference','text',''],attachment:['Evidence attachment','file','PNG, JPG, PDF, TXT, JSON or ZIP']
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    google.script.run.withSuccessHandler(init).withFailureHandler(fatal).getBootstrap();
+    document.getElementById('ticketForm').addEventListener('submit', beginSubmit);
+    document.querySelectorAll('input[name="clientMode"]').forEach(x => x.addEventListener('change', clientModeChanged));
+    document.getElementById('clientId').addEventListener('change', refreshCategories);
+    document.getElementById('newClientType').addEventListener('change', refreshCategories);
+    document.getElementById('categoryId').addEventListener('change', categoryChanged);
+    ['qSearch','qStatus','qPriority','qCategory','qSla'].forEach(id => document.getElementById(id)?.addEventListener('input', filterQueue));
+  });
+
+  function init(data){
+    BOOT=data; document.getElementById('userInfo').innerHTML=`${esc(data.user.name)}<br>${esc(data.user.role)}`;
+    document.getElementById('myHint').textContent=`All open tickets plus tickets resolved in the last ${data.resolvedVisibilityDays} days.`;
+    const clientSelect=document.getElementById('clientId'); data.clients.forEach(c=>clientSelect.insertAdjacentHTML('beforeend',`<option value="${escAttr(c.id)}" data-type="${escAttr(c.type)}">${esc(c.name)} — ${esc(c.type)}</option>`));
+    buildNav(); showPage('raisePage');
+  }
+
+  function buildNav(){
+    const items=[['raisePage','Raise Ticket'],['myPage','My Tickets']];
+    if(['POC','ADMIN'].includes(BOOT.user.role)) items.push(['queuePage','Shared Queue'],['numbersPage','Numbers']);
+    document.getElementById('nav').innerHTML=items.map(([id,label])=>`<button data-page="${id}" onclick="showPage('${id}')">${label}</button>`).join('');
+  }
+
+  function showPage(id){
+    document.querySelectorAll('.page').forEach(x=>x.classList.remove('active')); document.getElementById(id).classList.add('active');
+    document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===id));
+    if(id==='myPage') loadMyTickets(); if(id==='queuePage') loadQueue(); if(id==='numbersPage') loadNumbers();
+  }
+
+  function clientModeChanged(){
+    const mode=document.querySelector('input[name="clientMode"]:checked').value;
+    document.getElementById('existingClientBox').style.display=mode==='existing'?'block':'none';
+    document.getElementById('newClientNameBox').style.display=mode==='new'?'block':'none';
+    document.getElementById('newClientTypeBox').style.display=mode==='new'?'block':'none';
+    refreshCategories();
+  }
+
+  function selectedClientType(){
+    const mode=document.querySelector('input[name="clientMode"]:checked').value;
+    if(mode==='new') return document.getElementById('newClientType').value;
+    return document.getElementById('clientId').selectedOptions[0]?.dataset.type||'';
+  }
+
+  function refreshCategories(){
+    const type=selectedClientType(), select=document.getElementById('categoryId');
+    select.innerHTML='<option value="">Select category</option>';
+    BOOT.categories.filter(c=>c.clientType===type).forEach(c=>select.insertAdjacentHTML('beforeend',`<option value="${escAttr(c.id)}">${esc(c.name)}</option>`));
+    categoryChanged();
+  }
+
+  function categoryChanged(){
+    const cat=BOOT.categories.find(c=>c.id===document.getElementById('categoryId').value), box=document.getElementById('dynamicFields'); box.innerHTML='';
+    if(!cat){document.getElementById('slaSummary').style.display='none';return;}
+    cat.fields.forEach(key=>{
+      const [label,type,placeholder]=FIELD_DEFS[key]||[key,'text','']; const required=cat.requiredFields.includes(key); let input='';
+      if(type==='textarea') input=`<textarea name="${key}" placeholder="${escAttr(placeholder)}" ${required?'required':''}></textarea>`;
+      else if(type==='file') input=`<input type="file" name="attachment" accept=".png,.jpg,.jpeg,.pdf,.txt,.json,.zip" ${required?'required':''}><div class="hint">Maximum file size is controlled in Settings.</div>`;
+      else input=`<input type="${type}" name="${key}" placeholder="${escAttr(placeholder)}" ${required?'required':''}>`;
+      box.insertAdjacentHTML('beforeend',`<div class="${type==='textarea'?'full':''}"><label class="${required?'required':''}">${esc(label)}</label>${input}</div>`);
+    });
+    document.getElementById('summaryPriority').textContent=cat.priority; document.getElementById('summarySla').textContent=`${cat.slaHours} hours`;
+    document.getElementById('summaryDue').textContent=new Date(Date.now()+cat.slaHours*3600000).toLocaleString('en-IN'); document.getElementById('slaSummary').style.display='block';
+  }
+
+  function beginSubmit(e){
+    e.preventDefault(); const form=e.currentTarget;
+    if(!form.reportValidity()) return;
+    const payload={clientMode:form.clientMode.value,clientId:form.clientId.value,newClientName:form.newClientName.value,newClientType:form.newClientType.value,categoryId:form.categoryId.value,emailSubject:form.emailSubject.value};
+    setBusy(true,'Checking duplicates...'); google.script.run.withSuccessHandler(result=>{setBusy(false);if(result.hasDuplicate)showDuplicates(result.matches);else actualSubmit();}).withFailureHandler(err=>{setBusy(false);showError(err);}).checkDuplicate(payload);
+  }
+
+  function showDuplicates(matches){
+    document.getElementById('duplicateIds').value=matches.map(x=>x.ticketId).join(',');
+    document.getElementById('duplicateList').innerHTML=matches.map(x=>`<div class="detail" style="margin:8px 0"><b>${esc(x.ticketId)} · ${esc(x.status)} · ${x.similarity}% similar</b><div>${esc(x.subject)}</div><small>${esc(x.createdAt)}${x.canView?' · You can view this ticket from your ticket list.':''}</small></div>`).join('');
+    openModal('duplicateModal');
+  }
+  function raiseDespiteDuplicate(){document.getElementById('duplicateOverride').value='true';closeModal('duplicateModal');actualSubmit();}
+
+  function actualSubmit(){
+    const form=document.getElementById('ticketForm'); setBusy(true,'Raising ticket...');
+    google.script.run.withSuccessHandler(ticket=>{setBusy(false);toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{setBusy(false);showError(err);}).submitTicket(form);
+  }
+
+  function loadMyTickets(){
+    document.getElementById('myTickets').innerHTML=loading(); google.script.run.withSuccessHandler(rows=>renderTable('myTickets',rows)).withFailureHandler(showError).getMyTickets();
+  }
+  function loadQueue(){
+    document.getElementById('queueTickets').innerHTML=loading(); google.script.run.withSuccessHandler(rows=>{QUEUE=rows;populateQueueCategories();filterQueue();}).withFailureHandler(showError).getQueueTickets();
+  }
+  function populateQueueCategories(){const s=document.getElementById('qCategory'),current=s.value;s.innerHTML='<option value="">All categories</option>'+[...new Set(QUEUE.map(x=>x.categoryName))].sort().map(x=>`<option>${esc(x)}</option>`).join('');s.value=current;}
+  function filterQueue(){
+    const search=document.getElementById('qSearch').value.toLowerCase(),status=document.getElementById('qStatus').value,priority=document.getElementById('qPriority').value,cat=document.getElementById('qCategory').value,sla=document.getElementById('qSla').value;
+    const rows=QUEUE.filter(t=>!search||[t.ticketId,t.clientName,t.emailSubject,t.raiserEmail].join(' ').toLowerCase().includes(search)).filter(t=>status==='OPEN'?t.status!=='Resolved':(!status||t.status===status)).filter(t=>!priority||t.priority===priority).filter(t=>!cat||t.categoryName===cat).filter(t=>!sla||t.slaStatus===sla);
+    renderTable('queueTickets',rows,true);
+  }
+
+  function renderTable(target,rows,showRaiser=false){
+    if(!rows.length){document.getElementById(target).innerHTML='<div class="empty">No tickets found.</div>';return;}
+    document.getElementById(target).innerHTML=`<div class="table-wrap"><table><thead><tr><th>Ticket</th><th>Created</th><th>Client</th><th>Category</th><th>Subject</th><th>Priority</th><th>Status</th><th>SLA</th>${showRaiser?'<th>Raiser</th>':''}</tr></thead><tbody>${rows.map(t=>`<tr class="clickable" onclick="showTicket('${escAttr(t.ticketId)}')"><td><b>${esc(t.ticketId)}</b></td><td>${esc(t.createdAt)}</td><td>${esc(t.clientName)}</td><td>${esc(t.categoryName)}</td><td class="subject-cell">${esc(t.emailSubject)}</td><td><span class="badge ${escAttr(t.priority)}">${esc(t.priority)}</span></td><td><span class="badge ${escAttr(t.status)}">${esc(t.status)}</span></td><td><span class="badge ${escAttr(t.slaStatus.replace(' ','-'))}">${esc(t.slaStatus)}</span><br><small>${esc(t.slaDueAt)}</small></td>${showRaiser?`<td>${esc(t.raiserEmail)}</td>`:''}</tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function showTicket(id){openModal('detailModal');document.getElementById('detailContent').innerHTML=loading();google.script.run.withSuccessHandler(renderDetail).withFailureHandler(err=>{closeModal('detailModal');showError(err);}).getTicketDetail(id);}
+  function renderDetail(t){
+    CURRENT_TICKET=t; const canUpdate=['POC','ADMIN'].includes(BOOT.user.role)&&t.status!=='Resolved';
+    const dynamic=Object.entries(t.dynamicFields||{}).map(([k,v])=>`<div class="detail"><b>${esc((FIELD_DEFS[k]||[k])[0])}</b>${esc(v)}</div>`).join('');
+    const events=(t.events||[]).map(e=>`<div class="timeline-item"><b>${esc(e.eventType.replaceAll('_',' '))}</b><div>${esc(e.oldValue)}${e.oldValue||e.newValue?' → ':''}${esc(e.newValue)}</div><small>${esc(e.createdAt)} · ${esc(e.performedBy)}</small>${e.note?`<div class="hint">${esc(e.note)}</div>`:''}</div>`).join('');
+    document.getElementById('detailContent').innerHTML=`<div class="modal-header"><div><h2>${esc(t.ticketId)}</h2><div>${esc(t.emailSubject)}</div></div><button class="close" onclick="closeModal('detailModal')">×</button></div><div class="detail-grid" style="margin-top:16px"><div class="detail"><b>Client</b>${esc(t.clientName)} (${esc(t.clientType)})</div><div class="detail"><b>Category</b>${esc(t.categoryName)}</div><div class="detail"><b>Priority</b><span class="badge ${escAttr(t.priority)}">${esc(t.priority)}</span></div><div class="detail"><b>Status / SLA</b><span class="badge ${escAttr(t.status)}">${esc(t.status)}</span> <span class="badge ${escAttr(t.slaStatus.replace(' ','-'))}">${esc(t.slaStatus)}</span></div><div class="detail"><b>Raised by</b>${esc(t.raiserName)} · ${esc(t.raiserEmail)}</div><div class="detail"><b>Created / Due</b>${esc(t.createdAt)}<br>${esc(t.slaDueAt)}</div>${dynamic}</div><h3 style="margin-top:20px">Issue description</h3><div class="pre">${esc(t.issueDescription)}</div>${t.attachmentUrl?`<p><a href="${escAttr(t.attachmentUrl)}" target="_blank" rel="noopener">Open attachment: ${esc(t.attachmentFileName)}</a></p>`:''}${t.status==='Resolved'?`<h3>Resolution</h3><div class="detail-grid"><div class="detail"><b>Root cause</b>${esc(t.rootCause)}</div><div class="detail"><b>Resolved by</b>${esc(t.resolvedBy)} · ${esc(t.resolvedAt)}</div></div><div class="pre" style="margin-top:10px">${esc(t.resolutionNote)}</div>`:''}${canUpdate?statusActionHtml(t):''}<h3 style="margin-top:22px">History</h3><div class="timeline">${events||'<div class="empty">No events</div>'}</div>`;
+  }
+
+  function statusActionHtml(t){
+    if(t.status==='Raised') return `<div class="actions"><button class="btn btn-primary" onclick="moveToInvestigating()">Start investigating</button></div>`;
+    return `<div class="card" style="margin-top:18px;background:#f8fafc"><h3>Resolve ticket</h3><div class="grid"><div><label class="required">Root cause</label><select id="resolveRoot"><option value="">Select root cause</option>${BOOT.rootCauses.map(x=>`<option>${esc(x)}</option>`).join('')}</select></div><div class="full"><label class="required">Resolution note</label><textarea id="resolveNote" placeholder="What was fixed, why it happened, and anything useful for repeat issues"></textarea></div></div><div class="actions"><button class="btn btn-primary" onclick="resolveTicket()">Mark resolved</button></div></div>`;
+  }
+  function moveToInvestigating(){updateStatus({ticketId:CURRENT_TICKET.ticketId,newStatus:'Investigating'});}
+  function resolveTicket(){const root=document.getElementById('resolveRoot').value,note=document.getElementById('resolveNote').value;if(!root||!note.trim()){toast('Root cause and resolution note are mandatory.',true);return;}updateStatus({ticketId:CURRENT_TICKET.ticketId,newStatus:'Resolved',rootCause:root,resolutionNote:note});}
+  function updateStatus(payload){document.getElementById('detailContent').insertAdjacentHTML('afterbegin','<div id="statusLoader" class="hint"><span class="spinner"></span> Updating...</div>');google.script.run.withSuccessHandler(t=>{toast(`Ticket moved to ${t.status}.`);renderDetail(t);if(document.getElementById('queuePage').classList.contains('active'))loadQueue();}).withFailureHandler(err=>{document.getElementById('statusLoader')?.remove();showError(err);}).updateTicketStatus(payload);}
+
+  function loadNumbers(){document.getElementById('numbers').innerHTML=loading();google.script.run.withSuccessHandler(renderNumbers).withFailureHandler(showError).getNumbers();}
+  function renderNumbers(n){
+    document.getElementById('numbers').innerHTML=`<div class="card"><h2>Last ${n.days} days</h2><div class="metric-grid"><div class="metric"><div class="value">${n.raised}</div><div class="label">Tickets raised</div></div><div class="metric"><div class="value">${n.resolved}</div><div class="label">Tickets resolved</div></div><div class="metric"><div class="value">${n.open}</div><div class="label">Currently open</div></div><div class="metric"><div class="value">${n.overdue}</div><div class="label">Currently overdue</div></div><div class="metric"><div class="value">${n.adherence===null?'—':n.adherence+'%'}</div><div class="label">SLA adherence of resolved tickets</div></div></div></div><div class="grid"><div class="card"><h3>Open by priority</h3>${bars(n.byPriority)}</div><div class="card"><h3>Open by status</h3>${bars(n.byStatus)}</div><div class="card full"><h3>Open by category</h3>${bars(n.byCategory)}</div></div>`;
+  }
+  function bars(rows){const max=Math.max(1,...rows.map(x=>x.count));return rows.length?rows.map(x=>`<div class="bar-row"><div class="bar-name">${esc(x.name)}</div><div class="bar"><span style="width:${x.count/max*100}%"></span></div><div class="bar-count">${x.count}</div></div>`).join(''):'<div class="empty">No open tickets.</div>';}
+
+  function setBusy(busy,text){const btn=document.getElementById('submitBtn');btn.disabled=busy;btn.innerHTML=busy?`<span class="spinner"></span> ${esc(text)}`:'Check and raise ticket';}
+  function loading(){return '<div class="empty"><span class="spinner"></span> Loading...</div>';}
+  function openModal(id){document.getElementById(id).classList.add('show');}
+  function closeModal(id){document.getElementById(id).classList.remove('show');}
+  function toast(msg,error=false){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show'+(error?' error':'');setTimeout(()=>t.className='toast',4500);}
+  function showError(err){toast(err?.message||String(err),true);}
+  function fatal(err){document.querySelector('main').innerHTML=`<div class="card"><h2>Access or setup error</h2><div class="pre">${esc(err?.message||String(err))}</div></div>`;document.getElementById('userInfo').textContent='Unable to load';}
+  function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+  function escAttr(v){return esc(v);}
+</script>
+</body>
+</html>
