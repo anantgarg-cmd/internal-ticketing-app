@@ -352,10 +352,17 @@ function requireRole_(roles) {
 
 function validateDuplicatePayload_(payload) {
   if (!payload) throw new Error('Ticket data is missing.');
+  const mode = String(payload.clientMode || '');
+  const clientId = String(payload.clientId == null ? '' : payload.clientId).trim();
+  const clientName = cleanText_(payload.clientName, 200);
+  const clientType = String(payload.clientType || '');
+  if (!['existing','new'].includes(mode)) throw new Error('Choose a valid client status.');
+  if (!clientName) throw new Error('Client name is mandatory.');
+  if (!['360','Regular'].includes(clientType)) throw new Error('Choose 360 or Regular for the client.');
+  if (mode === 'existing' && !clientId) throw new Error('Client ID is mandatory for an existing client.');
+  if (clientId && (!/^\d+$/.test(clientId) || clientId.length > 20)) throw new Error('Client ID must contain only digits and be no more than 20 characters.');
   if (!cleanText_(payload.emailSubject, 300)) throw new Error('Email subject is mandatory.');
   if (!payload.categoryId) throw new Error('Category is mandatory.');
-  if (payload.clientMode === 'existing' && !payload.clientId) throw new Error('Choose an existing client.');
-  if (payload.clientMode === 'new' && !cleanText_(payload.newClientName, 200)) throw new Error('Enter the new client name.');
 }
 
 function validateTicketForm_(form, category, client) {
@@ -381,20 +388,17 @@ function validateTicketForm_(form, category, client) {
 }
 
 function resolveClient_(form, expectedClientType) {
-  const mode = String(form.clientMode || 'existing');
-  if (mode === 'existing') {
-    const client = getActiveClients_().find(c => String(c.id) === String(form.clientId));
-    if (!client) throw new Error('The selected client was not found or is inactive.');
-    if (client.type !== expectedClientType) throw new Error('The selected category does not match the client type.');
-    return { mode: 'Existing', id: client.id, name: client.name, type: client.type };
-  }
-
-  const name = cleanText_(form.newClientName, 200);
-  const type = String(form.newClientType || '');
-  if (!name) throw new Error('New client name is mandatory.');
-  if (!['360','Regular'].includes(type)) throw new Error('Choose 360 or Regular for the new client.');
-  if (type !== expectedClientType) throw new Error('The selected category does not match the new client type.');
-  return { mode: 'New', id: '', name, type };
+  const mode = String(form.clientMode || '');
+  const id = String(form.clientId == null ? '' : form.clientId).trim();
+  const name = cleanText_(form.clientName, 200);
+  const type = String(form.clientType || '');
+  if (!['existing','new'].includes(mode)) throw new Error('Choose a valid client status.');
+  if (!name) throw new Error('Client name is mandatory.');
+  if (mode === 'existing' && !id) throw new Error('Client ID is mandatory for an existing client.');
+  if (id && (!/^\d+$/.test(id) || id.length > 20)) throw new Error('Client ID must contain only digits and be no more than 20 characters.');
+  if (!['360','Regular'].includes(type)) throw new Error('Choose 360 or Regular for the client.');
+  if (type !== expectedClientType) throw new Error('The selected category does not match the client type.');
+  return { mode: mode === 'existing' ? 'Existing' : 'New', id, name, type };
 }
 
 // -------------------- Attachments --------------------
@@ -644,13 +648,15 @@ function extractDynamicFields_(form, category) {
 // -------------------- Duplicate matching --------------------
 
 function buildClientKeyFromPayload_(payload) {
-  if (payload.clientMode === 'existing') return `ID:${String(payload.clientId)}`;
-  return `NEW:${String(payload.newClientType)}:${normalizeSubject_(payload.newClientName)}`;
+  const clientId = String(payload.clientId == null ? '' : payload.clientId).trim();
+  if (clientId) return `ID:${clientId}`;
+  return `NAME:${String(payload.clientType)}:${normalizeSubject_(payload.clientName)}`;
 }
 
 function buildClientKeyFromTicket_(ticket) {
-  if (String(ticket.Client_Mode).toLowerCase() === 'existing' && ticket.Client_ID) return `ID:${String(ticket.Client_ID)}`;
-  return `NEW:${String(ticket.Client_Type)}:${normalizeSubject_(ticket.Client_Name)}`;
+  const clientId = String(ticket.Client_ID == null ? '' : ticket.Client_ID).trim();
+  if (clientId) return `ID:${clientId}`;
+  return `NAME:${String(ticket.Client_Type)}:${normalizeSubject_(ticket.Client_Name)}`;
 }
 
 function normalizeSubject_(value) {

@@ -69,27 +69,28 @@
       <form id="ticketForm">
         <div class="grid">
           <div class="full">
-            <label class="required">Client selection</label>
+            <label class="required">Client status</label>
             <div style="display:flex;gap:18px">
-              <label style="font-weight:normal"><input type="radio" name="clientMode" value="existing" checked style="width:auto"> Existing client</label>
-              <label style="font-weight:normal"><input type="radio" name="clientMode" value="new" style="width:auto"> New client</label>
+              <label style="font-weight:normal"><input type="radio" name="clientMode" value="existing" checked style="width:auto"> Existing/onboarded client</label>
+              <label style="font-weight:normal"><input type="radio" name="clientMode" value="new" style="width:auto"> New/unonboarded client</label>
             </div>
           </div>
-          <div id="existingClientBox">
-            <label for="clientId" class="required">Client</label>
-            <select id="clientId" name="clientId"><option value="">Select client</option></select>
+          <div>
+            <label for="clientId" id="clientIdLabel" class="required">Client ID</label>
+            <input id="clientId" name="clientId" type="text" inputmode="numeric" maxlength="20" required>
+            <div class="hint" id="clientIdHint"></div>
           </div>
-          <div id="newClientNameBox" style="display:none">
-            <label for="newClientName" class="required">New client name</label>
-            <input id="newClientName" name="newClientName" maxlength="200" placeholder="Enter client name">
+          <div>
+            <label for="clientName" class="required">Client name</label>
+            <input id="clientName" name="clientName" type="text" maxlength="200" placeholder="Enter the client or brand name" required>
           </div>
-          <div id="newClientTypeBox" style="display:none">
-            <label for="newClientType" class="required">New client type</label>
-            <select id="newClientType" name="newClientType"><option value="">Select type</option><option>360</option><option>Regular</option></select>
+          <div>
+            <label for="clientType" class="required">Client type</label>
+            <select id="clientType" name="clientType" required><option value="">Select type</option><option>360</option><option>Regular</option></select>
           </div>
           <div>
             <label for="categoryId" class="required">Category</label>
-            <select id="categoryId" name="categoryId"><option value="">Select client first</option></select>
+            <select id="categoryId" name="categoryId"><option value="">Select category</option></select>
           </div>
           <div>
             <label for="emailSubject" class="required">Email subject</label>
@@ -134,8 +135,7 @@
     document.getElementById('registrationForm').addEventListener('submit', submitRegistration);
     document.getElementById('ticketForm').addEventListener('submit', beginSubmit);
     document.querySelectorAll('input[name="clientMode"]').forEach(x => x.addEventListener('change', clientModeChanged));
-    document.getElementById('clientId').addEventListener('change', refreshCategories);
-    document.getElementById('newClientType').addEventListener('change', refreshCategories);
+    document.getElementById('clientType').addEventListener('change', refreshCategories);
     document.getElementById('categoryId').addEventListener('change', categoryChanged);
     ['qSearch','qStatus','qPriority','qCategory','qSla'].forEach(id => document.getElementById(id)?.addEventListener('input', filterQueue));
   });
@@ -181,8 +181,7 @@
   function init(data){
     BOOT=data; document.getElementById('userInfo').innerHTML=`${esc(data.user.name)}<br>${esc(data.user.role)}`;
     document.getElementById('myHint').textContent=`All open tickets plus tickets resolved in the last ${data.resolvedVisibilityDays} days.`;
-    const clientSelect=document.getElementById('clientId'); data.clients.forEach(c=>clientSelect.insertAdjacentHTML('beforeend',`<option value="${escAttr(c.id)}" data-type="${escAttr(c.type)}">${esc(c.name)} — ${esc(c.type)}</option>`));
-    buildNav(); showPage('raisePage');
+    buildNav(); clientModeChanged(); showPage('raisePage');
   }
 
   function buildNav(){
@@ -199,16 +198,15 @@
 
   function clientModeChanged(){
     const mode=document.querySelector('input[name="clientMode"]:checked').value;
-    document.getElementById('existingClientBox').style.display=mode==='existing'?'block':'none';
-    document.getElementById('newClientNameBox').style.display=mode==='new'?'block':'none';
-    document.getElementById('newClientTypeBox').style.display=mode==='new'?'block':'none';
-    refreshCategories();
+    const clientId=document.getElementById('clientId'), label=document.getElementById('clientIdLabel'), hint=document.getElementById('clientIdHint');
+    clientId.required=mode==='existing';
+    label.textContent=mode==='existing'?'Client ID':'Client ID (if available)';
+    label.classList.toggle('required',mode==='existing');
+    hint.textContent=mode==='new'?'Leave blank if the client ID has not been generated yet.':'';
   }
 
   function selectedClientType(){
-    const mode=document.querySelector('input[name="clientMode"]:checked').value;
-    if(mode==='new') return document.getElementById('newClientType').value;
-    return document.getElementById('clientId').selectedOptions[0]?.dataset.type||'';
+    return document.getElementById('clientType').value;
   }
 
   function refreshCategories(){
@@ -235,7 +233,7 @@
   function beginSubmit(e){
     e.preventDefault(); const form=e.currentTarget;
     if(!form.reportValidity()) return;
-    const payload={clientMode:form.clientMode.value,clientId:form.clientId.value,newClientName:form.newClientName.value,newClientType:form.newClientType.value,categoryId:form.categoryId.value,emailSubject:form.emailSubject.value};
+    const payload={clientMode:form.clientMode.value,clientId:form.clientId.value,clientName:form.clientName.value,clientType:form.clientType.value,categoryId:form.categoryId.value,emailSubject:form.emailSubject.value};
     setBusy(true,'Checking duplicates...'); google.script.run.withSuccessHandler(result=>{setBusy(false);if(result.hasDuplicate)showDuplicates(result.matches);else actualSubmit();}).withFailureHandler(err=>{setBusy(false);showError(err);}).checkDuplicate(payload);
   }
 
@@ -248,7 +246,7 @@
 
   function actualSubmit(){
     const form=document.getElementById('ticketForm'); setBusy(true,'Raising ticket...');
-    google.script.run.withSuccessHandler(ticket=>{setBusy(false);toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{setBusy(false);showError(err);}).submitTicket(form);
+    google.script.run.withSuccessHandler(ticket=>{setBusy(false);toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.querySelector('input[name="clientMode"][value="existing"]').checked=true;document.getElementById('clientId').value='';document.getElementById('clientName').value='';document.getElementById('clientType').value='';document.getElementById('categoryId').innerHTML='<option value="">Select category</option>';document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();categoryChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{setBusy(false);showError(err);}).submitTicket(form);
   }
 
   function loadMyTickets(){
