@@ -14,6 +14,7 @@
     *{box-sizing:border-box}html{background:var(--sf-grey-100)}body{margin:0;min-width:0;font-family:"Montserrat",Arial,sans-serif;background:#f4f7f5;color:var(--sf-black);font-size:14px;line-height:1.5}button,input,select,textarea{font:inherit}a{color:var(--sf-green-dark);font-weight:700}h1,h2,h3,p{margin-top:0}h2{font-size:24px;line-height:1.25;margin-bottom:6px}:focus-visible{outline:3px solid rgba(0,138,113,.3);outline-offset:2px}
     /* 3. App shell */
     header{height:76px;background:var(--sf-black);color:white;padding:12px 24px 12px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;position:sticky;top:0;z-index:20;border-bottom:3px solid var(--sf-yellow)}.brand-title{position:relative;padding-left:16px}.brand-title:before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:4px;background:var(--sf-yellow);border-radius:4px}.brand-title h1{font-size:17px;margin:0;font-weight:800}.brand-title p{font-size:11px;color:#d8d7d7;margin:2px 0 0}.user{font-size:11px;color:#eee;text-align:right;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 14px;min-width:140px}.app-layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 76px)}
+    .app-layout.registration-mode{grid-template-columns:minmax(0,1fr)}.app-layout.registration-mode nav{display:none!important}.app-layout.registration-mode main{grid-column:1/-1;width:100%;max-width:none;min-height:calc(100vh - 76px);display:flex;align-items:flex-start;justify-content:center;padding:48px 24px}.app-layout.registration-mode #registrationPage{width:100%;max-width:680px}.app-layout.registration-mode .registration-card{width:100%;max-width:680px;margin:0 auto}
     /* 4. Navigation */
     nav{background:white;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:6px;position:sticky;top:76px;height:calc(100vh - 76px);z-index:19}nav:before{content:"WORKSPACE";font-size:10px;font-weight:800;letter-spacing:1.2px;color:var(--sf-grey-500);padding:4px 12px 8px}nav button{border:1px solid transparent;background:transparent;min-height:44px;padding:10px 12px;font-weight:700;font-size:13px;color:var(--sf-grey-700);cursor:pointer;border-radius:8px;text-align:left;transition:.15s}nav button:hover{background:var(--sf-grey-100);color:var(--sf-black)}nav button.active{color:var(--sf-green-dark);background:var(--sf-green-soft);border-color:var(--sf-green-soft-2)}
     /* 5. Page structure */
@@ -36,7 +37,7 @@
     .toast{position:fixed;right:18px;bottom:18px;z-index:100;background:var(--sf-green-dark);color:white;padding:13px 17px;border-radius:9px;display:none;max-width:min(420px,calc(100vw - 36px));box-shadow:0 10px 30px rgba(0,0,0,.18)}.toast.show{display:block;animation:toastIn .16s}.toast.error{background:var(--danger)}.empty{text-align:center;color:var(--sf-grey-700);padding:36px 20px}.spinner{display:inline-block;width:18px;height:18px;border:3px solid rgba(128,130,133,.28);border-top-color:var(--sf-green);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle}.registration-card{max-width:620px;margin:36px auto;padding:32px;border-top:5px solid var(--sf-yellow)}.registration-copy{color:var(--sf-grey-700);margin-bottom:24px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeIn{from{opacity:0}}@keyframes toastIn{from{opacity:0;transform:translateY(8px)}}
     /* 14. Responsive rules */
     @media(max-width:1000px){.metric-grid{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(2,1fr)}.filters input:first-child{grid-column:1/-1}}
-    @media(max-width:800px){header{height:72px;padding:10px 16px}.brand-title h1{font-size:15px}.brand-title p{font-size:10px}.app-layout{display:block}nav{height:auto;position:sticky;top:72px;flex-direction:row;overflow-x:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line)}nav:before{display:none}nav button{flex:0 0 auto;text-align:center;min-width:120px}main{padding:22px 18px 40px}.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.full{grid-column:auto}.summary{grid-template-columns:1fr}.summary>div{border-right:0;border-bottom:1px solid #ddd98a;padding:10px 14px}.metric-grid{grid-template-columns:1fr 1fr}.form-section,.card{padding:20px}}
+    @media(max-width:800px){header{height:72px;padding:10px 16px}.brand-title h1{font-size:15px}.brand-title p{font-size:10px}.app-layout{display:block}.app-layout.registration-mode main{min-height:calc(100vh - 72px);padding:24px 16px}.app-layout.registration-mode #registrationPage,.app-layout.registration-mode .registration-card{width:100%;max-width:680px}nav{height:auto;position:sticky;top:72px;flex-direction:row;overflow-x:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line)}nav:before{display:none}nav button{flex:0 0 auto;text-align:center;min-width:120px}main{padding:22px 18px 40px}.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.full{grid-column:auto}.summary{grid-template-columns:1fr}.summary>div{border-right:0;border-bottom:1px solid #ddd98a;padding:10px 14px}.metric-grid{grid-template-columns:1fr 1fr}.form-section,.card{padding:20px}}
     @media(max-width:520px){header{gap:8px}.user{min-width:0;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title{padding-left:10px}.brand-title p{display:none}main{padding:16px 10px 32px}.registration-card{margin:8px auto;padding:20px}.radio-options,.segmented{flex-direction:column}.filters{grid-template-columns:1fr}.filters input:first-child{grid-column:auto}.metric-grid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column-reverse}.actions .btn{width:100%}.modal-backdrop{padding:0}.modal{height:100vh;max-height:100vh;border-radius:0;padding:0 16px 18px}.bar-name{width:100px}.toast{right:10px;bottom:10px}}
     /* 15. Reduced motion */
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
@@ -133,6 +134,8 @@
 
   function handleEntryState(result){
     if(result?.state==='REGISTER'){
+      const appLayout=document.querySelector('.app-layout');
+      appLayout.classList.add('registration-mode');
       document.getElementById('nav').style.display='none';
       document.getElementById('userInfo').textContent='Registration required';
       document.getElementById('registrationEmail').value=String(result.email||'');
@@ -144,6 +147,7 @@
       return;
     }
     if(result?.state==='ACTIVE'){
+      document.querySelector('.app-layout').classList.remove('registration-mode');
       loadApplication();
       return;
     }
@@ -151,7 +155,8 @@
   }
 
   function loadApplication(){
-    document.getElementById('nav').style.display='flex';
+    document.querySelector('.app-layout').classList.remove('registration-mode');
+    document.getElementById('nav').style.removeProperty('display');
     google.script.run.withSuccessHandler(init).withFailureHandler(fatal).getBootstrap();
   }
 
