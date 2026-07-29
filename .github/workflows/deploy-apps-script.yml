@@ -14,16 +14,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      - name: npm ci
         run: npm ci
 
       - name: Restore clasp credentials
@@ -33,7 +33,7 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           chmod 600 "$HOME/.clasprc.json"
 
-      - name: Configure deployment
+      - name: Select environment
         env:
           CLASP_JSON_DEV: ${{ secrets.CLASP_JSON_DEV }}
           CLASP_JSON_PROD: ${{ secrets.CLASP_JSON_PROD }}
@@ -43,28 +43,73 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == "develop" ]]; then
             printf '%s' "$CLASP_JSON_DEV" > .clasp.json
             printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID_DEV" >> "$GITHUB_ENV"
+            printf 'DEPLOYMENT_ENVIRONMENT=Development\n' >> "$GITHUB_ENV"
           else
             printf '%s' "$CLASP_JSON_PROD" > .clasp.json
             printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID_PROD" >> "$GITHUB_ENV"
+            printf 'DEPLOYMENT_ENVIRONMENT=Production\n' >> "$GITHUB_ENV"
+          fi
+
+      - name: Validate secrets
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [[ -z "$CLASPRC_JSON" || ! -s .clasp.json || -z "$DEPLOYMENT_ID" ]]; then
+            echo 'Required Apps Script deployment secrets are not configured.' >&2
+            exit 1
+          fi
+
+          printf '::add-mask::%s\n' "$DEPLOYMENT_ID"
+          jq -e 'type == "object" and (.scriptId | type == "string" and length > 0)' \
+            .clasp.json > /dev/null
+          jq -e 'type == "object"' "$HOME/.clasprc.json" > /dev/null
+
+      - name: Stamp commit marker
+        run: |
+          printf '\n// Deployment commit: %s\n' "$GITHUB_SHA" >> Code.js
+
+      - name: Confirm clasp command syntax
+        run: |
+          npx clasp --version
+          npx clasp list-deployments --help
+          npx clasp create-version --help
+          npx clasp create-deployment --help
+
+      - name: Validate deployment
+        run: |
+          deployments=$(npx clasp list-deployments)
+          if ! printf '%s\n' "$deployments" | grep -Fq "$DEPLOYMENT_ID"; then
+            echo 'Configured deployment ID does not belong to the selected Apps Script project.' >&2
+            exit 1
           fi
 
       - name: Push Apps Script files
         run: npx clasp push --force
 
-      - name: Create Apps Script version
+      - name: Create version
         id: version
         run: |
-          output=$(npx clasp version "Automated deployment from ${GITHUB_SHA}")
-          version=$(printf '%s\n' "$output" | sed -nE 's/.*[Vv]ersion ([0-9]+).*/\1/p' | tail -n 1)
+          output=$(npx clasp create-version "Automated deployment from ${GITHUB_SHA}")
+          version=$(printf '%s\n' "$output" \
+            | sed -nE 's/^Created version ([0-9]+)\.?$/\1/p' \
+            | tail -n 1)
           if [[ -z "$version" ]]; then
-            printf 'Unable to determine Apps Script version from clasp output.\n' >&2
+            echo 'Unable to determine Apps Script version from clasp create-version output.' >&2
             exit 1
           fi
           printf 'number=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
-      - name: Update existing deployment
-        run: >-
-          npx clasp deploy
-          --deploymentId "$DEPLOYMENT_ID"
-          --versionNumber "${{ steps.version.outputs.number }}"
-          --description "Automated deployment from ${GITHUB_SHA}"
+      - name: Update deployment
+        run: |
+          output=$(npx clasp create-deployment \
+            --deploymentId "$DEPLOYMENT_ID" \
+            --versionNumber "${{ steps.version.outputs.number }}" \
+            --description "Automated deployment from ${GITHUB_SHA}")
+
+      - name: Verify deployment
+        run: |
+          deployments=$(npx clasp list-deployments)
+          if ! printf '%s\n' "$deployments" | grep -Fq "$DEPLOYMENT_ID"; then
+            echo 'Updated deployment could not be verified.' >&2
+            exit 1
+          fi
