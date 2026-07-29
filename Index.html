@@ -13,7 +13,7 @@
     /* 2. Reset and base */
     *{box-sizing:border-box}html{background:var(--sf-grey-100)}body{margin:0;min-width:0;font-family:"Montserrat",Arial,sans-serif;background:#f4f7f5;color:var(--sf-black);font-size:14px;line-height:1.5}button,input,select,textarea{font:inherit}a{color:var(--sf-green-dark);font-weight:700}h1,h2,h3,p{margin-top:0}h2{font-size:24px;line-height:1.25;margin-bottom:6px}:focus-visible{outline:3px solid rgba(0,138,113,.3);outline-offset:2px}
     /* 3. App shell */
-    header{height:76px;background:var(--sf-black);color:white;padding:12px 24px 12px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;position:sticky;top:0;z-index:20;border-bottom:3px solid var(--sf-yellow)}.brand-title{position:relative;padding-left:16px}.brand-title:before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:4px;background:var(--sf-yellow);border-radius:4px}.brand-title h1{font-size:17px;margin:0;font-weight:800}.brand-title p{font-size:11px;color:#d8d7d7;margin:2px 0 0}.user{font-size:11px;color:#eee;text-align:right;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 14px;min-width:140px}.app-layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 76px)}
+    header{height:76px;background:var(--sf-black);color:white;padding:12px 24px 12px 28px;display:flex;align-items:center;justify-content:space-between;gap:24px;position:sticky;top:0;z-index:20;border-bottom:3px solid var(--sf-yellow)}.brand-title{position:relative;padding-left:16px}.brand-title:before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:4px;background:var(--sf-yellow);border-radius:4px}.brand-title h1{font-size:17px;margin:0;font-weight:800}.brand-title p{font-size:11px;color:#d8d7d7;margin:2px 0 0}.header-meta{display:flex;align-items:center;gap:12px}.release-indicator{font-size:10px;color:#d8d7d7;white-space:nowrap}.user{font-size:11px;color:#eee;text-align:right;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:7px 14px;min-width:140px}.app-layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 76px)}.app-layout.registration-mode{display:block}.app-layout.registration-mode nav{display:none}.app-layout.registration-mode main{max-width:760px}
     /* 4. Navigation */
     nav{background:white;border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:6px;position:sticky;top:76px;height:calc(100vh - 76px);z-index:19}nav:before{content:"WORKSPACE";font-size:10px;font-weight:800;letter-spacing:1.2px;color:var(--sf-grey-500);padding:4px 12px 8px}nav button{border:1px solid transparent;background:transparent;min-height:44px;padding:10px 12px;font-weight:700;font-size:13px;color:var(--sf-grey-700);cursor:pointer;border-radius:8px;text-align:left;transition:.15s}nav button:hover{background:var(--sf-grey-100);color:var(--sf-black)}nav button.active{color:var(--sf-green-dark);background:var(--sf-green-soft);border-color:var(--sf-green-soft-2)}
     /* 5. Page structure */
@@ -37,7 +37,7 @@
     /* 14. Responsive rules */
     @media(max-width:1000px){.metric-grid{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(2,1fr)}.filters input:first-child{grid-column:1/-1}}
     @media(max-width:800px){header{height:72px;padding:10px 16px}.brand-title h1{font-size:15px}.brand-title p{font-size:10px}.app-layout{display:block}nav{height:auto;position:sticky;top:72px;flex-direction:row;overflow-x:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line)}nav:before{display:none}nav button{flex:0 0 auto;text-align:center;min-width:120px}main{padding:22px 18px 40px}.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.full{grid-column:auto}.summary{grid-template-columns:1fr}.summary>div{border-right:0;border-bottom:1px solid #ddd98a;padding:10px 14px}.metric-grid{grid-template-columns:1fr 1fr}.form-section,.card{padding:20px}}
-    @media(max-width:520px){header{gap:8px}.user{min-width:0;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title{padding-left:10px}.brand-title p{display:none}main{padding:16px 10px 32px}.registration-card{margin:8px auto;padding:20px}.radio-options,.segmented{flex-direction:column}.filters{grid-template-columns:1fr}.filters input:first-child{grid-column:auto}.metric-grid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column-reverse}.actions .btn{width:100%}.modal-backdrop{padding:0}.modal{height:100vh;max-height:100vh;border-radius:0;padding:0 16px 18px}.bar-name{width:100px}.toast{right:10px;bottom:10px}}
+    @media(max-width:520px){header{gap:8px}.header-meta{gap:6px}.release-indicator{display:none}.user{min-width:0;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title{padding-left:10px}.brand-title p{display:none}main{padding:16px 10px 32px}.registration-card{margin:8px auto;padding:20px}.radio-options,.segmented{flex-direction:column}.filters{grid-template-columns:1fr}.filters input:first-child{grid-column:auto}.metric-grid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column-reverse}.actions .btn{width:100%}.modal-backdrop{padding:0}.modal{height:100vh;max-height:100vh;border-radius:0;padding:0 16px 18px}.bar-name{width:100px}.toast{right:10px;bottom:10px}}
     /* 15. Reduced motion */
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
   </style>
@@ -45,7 +45,7 @@
 <body>
 <header>
   <div class="brand-title"><h1>Internal Issue Ticketing System</h1><p>Sales to Tech/Product issue resolution</p></div>
-  <div class="user" id="userInfo">Loading...</div>
+  <div class="header-meta"><span class="release-indicator" id="releaseIndicator"></span><div class="user" id="userInfo">Loading...</div></div>
 </header>
 <div class="app-layout">
 <nav id="nav" aria-label="Primary navigation"></nav>
@@ -117,11 +117,15 @@
 
 <script>
   let BOOT = null, QUEUE = [], CURRENT_TICKET = null;
+  const EXPECTED_RELEASE = 'registration-v2';
+  const FRONTEND_COMMIT = '__APP_COMMIT__';
+  const VERSION_MISMATCH_MESSAGE = 'This web-app URL is running mismatched frontend and backend versions. Please contact the application administrator and share the URL being used.';
   const FIELD_DEFS = {
     awb:['AWB number','text','e.g. SF123456789'],order_id:['Order ID','text','Client/order reference'],endpoint:['API endpoint','text','e.g. /orders/create'],api_log:['API request/response or error log','textarea','Paste relevant logs; remove passwords and tokens'],label_type:['Label type','text','e.g. 4×6 PDF'],invoice_reference:['Invoice month/number','text','e.g. June 2026 / INV-123'],amount:['Amount','number','Enter amount'],expected_date:['Expected date','date',''],seller_id:['Seller ID','text',''],user_identifier:['Affected user email/mobile','text',''],origin_pincode:['Origin pincode','text','6-digit pincode'],destination_pincode:['Destination pincode','text','6-digit pincode'],service_type:['Service type','text','e.g. Surface/Air'],expected_status:['Expected status','text',''],actual_status:['Actual status received','text',''],wallet_reference:['Wallet/transaction reference','text',''],attachment:['Evidence attachment','file','PNG, JPG, PDF, TXT, JSON or ZIP']
   };
 
   document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('releaseIndicator').textContent=`Release: ${EXPECTED_RELEASE}${FRONTEND_COMMIT==='__APP_COMMIT__'?'':` · ${FRONTEND_COMMIT}`}`;
     google.script.run.withSuccessHandler(handleEntryState).withFailureHandler(fatal).getEntryState();
     document.getElementById('registrationForm').addEventListener('submit', submitRegistration);
     document.getElementById('ticketForm').addEventListener('submit', beginSubmit);
@@ -132,8 +136,12 @@
   });
 
   function handleEntryState(result){
+    if(result?.release!==EXPECTED_RELEASE){
+      fatal({message:VERSION_MISMATCH_MESSAGE});
+      return;
+    }
     if(result?.state==='REGISTER'){
-      document.getElementById('nav').style.display='none';
+      document.querySelector('.app-layout').classList.add('registration-mode');
       document.getElementById('userInfo').textContent='Registration required';
       document.getElementById('registrationEmail').value=String(result.email||'');
       showPage('registrationPage');
@@ -144,6 +152,8 @@
       return;
     }
     if(result?.state==='ACTIVE'){
+      document.querySelector('.app-layout').classList.remove('registration-mode');
+      document.getElementById('nav').style.removeProperty('display');
       loadApplication();
       return;
     }
@@ -151,7 +161,6 @@
   }
 
   function loadApplication(){
-    document.getElementById('nav').style.display='flex';
     google.script.run.withSuccessHandler(init).withFailureHandler(fatal).getBootstrap();
   }
 

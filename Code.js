@@ -3,6 +3,9 @@
  * Do not put passwords or the Slack webhook directly in this file.
  */
 
+const APP_RELEASE = 'registration-v2';
+const APP_COMMIT = '__APP_COMMIT__';
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle(APP.TITLE)
@@ -290,19 +293,35 @@ function getVerifiedCompanyEmail_() {
 function getEntryState() {
   const email = getVerifiedCompanyEmail_();
   const row = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email);
-  if (!row) return { state: 'REGISTER', email };
+  if (!row) return { state: 'REGISTER', email: email, release: APP_RELEASE };
   if (!truthy_(row.Active)) {
     return {
       state: 'BLOCKED',
       email,
-      message: 'Your access has been disabled. Please contact the application administrator.'
+      message: 'Your access has been disabled. Please contact the application administrator.',
+      release: APP_RELEASE
     };
   }
   return {
     state: 'ACTIVE',
     email,
     name: String(row.Name || email.split('@')[0]),
-    role: String(row.Role || '').toUpperCase()
+    role: String(row.Role || '').toUpperCase(),
+    release: APP_RELEASE
+  };
+}
+
+function getRuntimeDiagnostics() {
+  const settings = getSettings_();
+  return {
+    scriptId: ScriptApp.getScriptId(),
+    serviceUrl: ScriptApp.getService().getUrl(),
+    release: APP_RELEASE,
+    commit: APP_COMMIT === '__APP_COMMIT__' ? '' : APP_COMMIT,
+    hasGetEntryState: typeof getEntryState === 'function',
+    timestamp: new Date().toISOString(),
+    companyDomain: lower_(settings.COMPANY_DOMAIN),
+    usersSheetExists: Boolean(getSpreadsheet_().getSheetByName(APP.SHEETS.USERS))
   };
 }
 
