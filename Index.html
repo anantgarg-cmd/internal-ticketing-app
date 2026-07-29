@@ -39,6 +39,7 @@
     @media(max-width:800px){header{height:72px;padding:10px 16px}.brand-title h1{font-size:15px}.brand-title p{font-size:10px}.app-layout{display:block}nav{height:auto;position:sticky;top:72px;flex-direction:row;overflow-x:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line)}nav:before{display:none}nav button{flex:0 0 auto;text-align:center;min-width:120px}main{padding:22px 18px 40px}.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.full{grid-column:auto}.summary{grid-template-columns:1fr}.summary>div{border-right:0;border-bottom:1px solid #ddd98a;padding:10px 14px}.metric-grid{grid-template-columns:1fr 1fr}.form-section,.card{padding:20px}}
     @media(max-width:520px){header{gap:8px}.header-meta{gap:6px}.release-indicator{display:none}.user{min-width:0;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title{padding-left:10px}.brand-title p{display:none}main{padding:16px 10px 32px}.registration-card{margin:8px auto;padding:20px}.radio-options,.segmented{flex-direction:column}.filters{grid-template-columns:1fr}.filters input:first-child{grid-column:auto}.metric-grid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column-reverse}.actions .btn{width:100%}.modal-backdrop{padding:0}.modal{height:100vh;max-height:100vh;border-radius:0;padding:0 16px 18px}.bar-name{width:100px}.toast{right:10px;bottom:10px}}
     /* 15. Reduced motion */
+    .btn-small{min-height:34px;padding:6px 12px;margin-top:12px;font-size:12px}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:14px;flex-wrap:wrap}.pagination .hint{margin:0 auto 0 0}
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
   </style>
 </head>
@@ -103,11 +104,11 @@
     </div>
   </section>
 
-  <section id="myPage" class="page"><div class="page-intro"><div class="eyebrow">Your activity</div><h2>My tickets</h2><p id="myHint"></p></div><div class="card"><div id="myTickets"></div></div></section>
+  <section id="myPage" class="page"><div class="page-intro"><div class="eyebrow">Your activity</div><h2>My tickets</h2><p id="myHint"></p><button class="btn btn-secondary btn-small" onclick="loadMyTickets(true)">Refresh</button></div><div class="card"><div id="myTickets"></div></div></section>
 
-  <section id="queuePage" class="page"><div class="page-intro"><div class="eyebrow">Operations workbench</div><h2>Shared ticket queue</h2><p>Overdue issues appear first, followed by priority and oldest raised time.</p></div><div class="card"><div class="filters"><input id="qSearch" placeholder="Search ticket, client or subject"><select id="qStatus"><option value="OPEN">Open only</option><option value="">All statuses</option><option>Raised</option><option>Investigating</option><option>Resolved</option></select><select id="qPriority"><option value="">All priorities</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select><select id="qCategory"><option value="">All categories</option></select><select id="qSla"><option value="">All SLA states</option><option>OVERDUE</option><option>ON TRACK</option><option>MET</option><option>BREACHED</option></select></div><div id="queueTickets"></div></div></section>
+  <section id="queuePage" class="page"><div class="page-intro"><div class="eyebrow">Operations workbench</div><h2>Shared ticket queue</h2><p>Overdue issues appear first, followed by priority and oldest raised time.</p><button class="btn btn-secondary btn-small" onclick="loadQueue(true)">Refresh</button></div><div class="card"><div class="filters"><input id="qSearch" placeholder="Search ticket, client or subject"><select id="qStatus"><option value="OPEN">Open only</option><option value="">All statuses</option><option>Raised</option><option>Investigating</option><option>Resolved</option></select><select id="qPriority"><option value="">All priorities</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select><select id="qCategory"><option value="">All categories</option></select><select id="qSla"><option value="">All SLA states</option><option>OVERDUE</option><option>ON TRACK</option><option>MET</option><option>BREACHED</option></select></div><div id="queueTickets"></div><div id="queuePagination" class="pagination"></div></div></section>
 
-  <section id="numbersPage" class="page"><div id="numbers"></div></section>
+  <section id="numbersPage" class="page"><div class="page-intro"><button class="btn btn-secondary btn-small" onclick="loadNumbers(true)">Refresh</button></div><div id="numbers"></div></section>
 </main>
 </div>
 
@@ -116,7 +117,10 @@
 <div class="toast" id="toast"></div>
 
 <script>
-  let BOOT = null, QUEUE = [], CURRENT_TICKET = null;
+  let BOOT = null, QUEUE = [], CURRENT_TICKET = null, SEARCH_TIMER = null;
+  const TAB_CACHE = { my: null, queue: new Map(), numbers: null };
+  const CACHE_TTL = { my: 30000, queue: 30000, numbers: 60000 };
+  let QUEUE_STATE = { page: 1, pageSize: 50, totalRows: 0, totalPages: 1, categories: [] };
   const EXPECTED_RELEASE = 'registration-v2';
   const FRONTEND_COMMIT = '__APP_COMMIT__';
   const VERSION_MISMATCH_MESSAGE = 'This web-app URL is running mismatched frontend and backend versions. Please contact the application administrator and share the URL being used.';
@@ -126,13 +130,14 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('releaseIndicator').textContent=`Release: ${EXPECTED_RELEASE}${FRONTEND_COMMIT==='__APP_COMMIT__'?'':` · ${FRONTEND_COMMIT}`}`;
-    google.script.run.withSuccessHandler(handleEntryState).withFailureHandler(fatal).getEntryState();
+    google.script.run.withSuccessHandler(handleEntryState).withFailureHandler(fatal).getInitialAppState();
     document.getElementById('registrationForm').addEventListener('submit', submitRegistration);
     document.getElementById('ticketForm').addEventListener('submit', beginSubmit);
     document.querySelectorAll('input[name="clientMode"]').forEach(x => x.addEventListener('change', clientModeChanged));
     document.getElementById('clientType').addEventListener('change', refreshCategories);
     document.getElementById('categoryId').addEventListener('change', categoryChanged);
-    ['qSearch','qStatus','qPriority','qCategory','qSla'].forEach(id => document.getElementById(id)?.addEventListener('input', filterQueue));
+    ['qStatus','qPriority','qCategory','qSla'].forEach(id => document.getElementById(id)?.addEventListener('change',()=>{QUEUE_STATE.page=1;loadQueue(true);}));
+    document.getElementById('qSearch').addEventListener('input',()=>{clearTimeout(SEARCH_TIMER);SEARCH_TIMER=setTimeout(()=>{QUEUE_STATE.page=1;loadQueue(true);},300);});
   });
 
   function handleEntryState(result){
@@ -154,14 +159,10 @@
     if(result?.state==='ACTIVE'){
       document.querySelector('.app-layout').classList.remove('registration-mode');
       document.getElementById('nav').style.removeProperty('display');
-      loadApplication();
+      init(result.bootstrap);
       return;
     }
     fatal({message:'The application returned an invalid entry state. Please contact the application administrator.'});
-  }
-
-  function loadApplication(){
-    google.script.run.withSuccessHandler(init).withFailureHandler(fatal).getBootstrap();
   }
 
   function submitRegistration(event){
@@ -246,21 +247,22 @@
 
   function actualSubmit(){
     const form=document.getElementById('ticketForm'); setBusy(true,'Raising ticket...');
-    google.script.run.withSuccessHandler(ticket=>{setBusy(false);toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.querySelector('input[name="clientMode"][value="existing"]').checked=true;document.getElementById('clientId').value='';document.getElementById('clientName').value='';document.getElementById('clientType').value='';document.getElementById('categoryId').innerHTML='<option value="">Select category</option>';document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();categoryChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{setBusy(false);showError(err);}).submitTicket(form);
+    google.script.run.withSuccessHandler(ticket=>{setBusy(false);invalidateTicketCaches();toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.querySelector('input[name="clientMode"][value="existing"]').checked=true;document.getElementById('clientId').value='';document.getElementById('clientName').value='';document.getElementById('clientType').value='';document.getElementById('categoryId').innerHTML='<option value="">Select category</option>';document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();categoryChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{setBusy(false);showError(err);}).submitTicket(form);
   }
 
-  function loadMyTickets(){
-    document.getElementById('myTickets').innerHTML=loading(); google.script.run.withSuccessHandler(rows=>renderTable('myTickets',rows)).withFailureHandler(showError).getMyTickets();
+  function loadMyTickets(refresh=false){
+    if(!refresh&&isFresh(TAB_CACHE.my,CACHE_TTL.my)){renderTable('myTickets',TAB_CACHE.my.data);return;}
+    document.getElementById('myTickets').innerHTML=loading(); google.script.run.withSuccessHandler(rows=>{TAB_CACHE.my={data:rows,at:Date.now()};renderTable('myTickets',rows);}).withFailureHandler(showError).getMyTickets();
   }
-  function loadQueue(){
-    document.getElementById('queueTickets').innerHTML=loading(); google.script.run.withSuccessHandler(rows=>{QUEUE=rows;populateQueueCategories();filterQueue();}).withFailureHandler(showError).getQueueTickets();
+  function queueFilters(){return {search:document.getElementById('qSearch').value,status:document.getElementById('qStatus').value,priority:document.getElementById('qPriority').value,category:document.getElementById('qCategory').value,sla:document.getElementById('qSla').value,page:QUEUE_STATE.page,pageSize:QUEUE_STATE.pageSize};}
+  function loadQueue(refresh=false){
+    const filters=queueFilters(),key=JSON.stringify(filters),cached=TAB_CACHE.queue.get(key);
+    if(!refresh&&isFresh(cached,CACHE_TTL.queue)){renderQueueResponse(cached.data);return;}
+    document.getElementById('queueTickets').innerHTML=loading(); google.script.run.withSuccessHandler(result=>{TAB_CACHE.queue.set(key,{data:result,at:Date.now()});renderQueueResponse(result);}).withFailureHandler(showError).getQueueTickets(filters);
   }
-  function populateQueueCategories(){const s=document.getElementById('qCategory'),current=s.value;s.innerHTML='<option value="">All categories</option>'+[...new Set(QUEUE.map(x=>x.categoryName))].sort().map(x=>`<option>${esc(x)}</option>`).join('');s.value=current;}
-  function filterQueue(){
-    const search=document.getElementById('qSearch').value.toLowerCase(),status=document.getElementById('qStatus').value,priority=document.getElementById('qPriority').value,cat=document.getElementById('qCategory').value,sla=document.getElementById('qSla').value;
-    const rows=QUEUE.filter(t=>!search||[t.ticketId,t.clientName,t.emailSubject,t.raiserEmail].join(' ').toLowerCase().includes(search)).filter(t=>status==='OPEN'?t.status!=='Resolved':(!status||t.status===status)).filter(t=>!priority||t.priority===priority).filter(t=>!cat||t.categoryName===cat).filter(t=>!sla||t.slaStatus===sla);
-    renderTable('queueTickets',rows,true);
-  }
+  function renderQueueResponse(result){QUEUE=result.rows;QUEUE_STATE={...QUEUE_STATE,page:result.page,pageSize:result.pageSize,totalRows:result.totalRows,totalPages:result.totalPages,categories:result.categories};populateQueueCategories();renderTable('queueTickets',QUEUE,true);const start=result.totalRows?(result.page-1)*result.pageSize+1:0,end=Math.min(result.page*result.pageSize,result.totalRows);document.getElementById('queuePagination').innerHTML=`<span class="hint">Showing ${start}–${end} of ${result.totalRows} tickets</span><button class="btn btn-secondary btn-small" ${result.page<=1?'disabled':''} onclick="changeQueuePage(-1)">Previous</button><button class="btn btn-secondary btn-small" ${result.page>=result.totalPages?'disabled':''} onclick="changeQueuePage(1)">Next</button>`;}
+  function populateQueueCategories(){const s=document.getElementById('qCategory'),current=s.value;s.innerHTML='<option value="">All categories</option>'+QUEUE_STATE.categories.map(x=>`<option>${esc(x)}</option>`).join('');s.value=current;}
+  function changeQueuePage(delta){QUEUE_STATE.page+=delta;loadQueue();}
 
   function renderTable(target,rows,showRaiser=false){
     if(!rows.length){document.getElementById(target).innerHTML='<div class="empty">No tickets found.</div>';return;}
@@ -281,13 +283,27 @@
   }
   function moveToInvestigating(){updateStatus({ticketId:CURRENT_TICKET.ticketId,newStatus:'Investigating'});}
   function resolveTicket(){const root=document.getElementById('resolveRoot').value,note=document.getElementById('resolveNote').value;if(!root||!note.trim()){toast('Root cause and resolution note are mandatory.',true);return;}updateStatus({ticketId:CURRENT_TICKET.ticketId,newStatus:'Resolved',rootCause:root,resolutionNote:note});}
-  function updateStatus(payload){document.getElementById('detailContent').insertAdjacentHTML('afterbegin','<div id="statusLoader" class="hint"><span class="spinner"></span> Updating...</div>');google.script.run.withSuccessHandler(t=>{toast(`Ticket moved to ${t.status}.`);renderDetail(t);if(document.getElementById('queuePage').classList.contains('active'))loadQueue();}).withFailureHandler(err=>{document.getElementById('statusLoader')?.remove();showError(err);}).updateTicketStatus(payload);}
+  function updateStatus(payload){document.getElementById('detailContent').insertAdjacentHTML('afterbegin','<div id="statusLoader" class="hint"><span class="spinner"></span> Updating...</div>');google.script.run.withSuccessHandler(t=>{toast(`Ticket moved to ${t.status}.`);renderDetail(t);TAB_CACHE.my=null;TAB_CACHE.numbers=null;updateQueueCacheTicket(t);}).withFailureHandler(err=>{document.getElementById('statusLoader')?.remove();showError(err);}).updateTicketStatus(payload);}
 
-  function loadNumbers(){document.getElementById('numbers').innerHTML=loading();google.script.run.withSuccessHandler(renderNumbers).withFailureHandler(showError).getNumbers();}
+  function loadNumbers(refresh=false){if(!refresh&&isFresh(TAB_CACHE.numbers,CACHE_TTL.numbers)){renderNumbers(TAB_CACHE.numbers.data);return;}document.getElementById('numbers').innerHTML=loading();google.script.run.withSuccessHandler(n=>{TAB_CACHE.numbers={data:n,at:Date.now()};renderNumbers(n);}).withFailureHandler(showError).getNumbers();}
   function renderNumbers(n){
     document.getElementById('numbers').innerHTML=`<div class="page-intro"><div class="eyebrow">Performance snapshot</div><h2>Numbers</h2><p>Operational health across the last ${n.days} days.</p></div><div class="card"><h3>Last ${n.days} days</h3><div class="metric-grid"><div class="metric"><div class="value">${n.raised}</div><div class="label">Tickets raised</div></div><div class="metric"><div class="value">${n.resolved}</div><div class="label">Tickets resolved</div></div><div class="metric"><div class="value">${n.open}</div><div class="label">Currently open</div></div><div class="metric"><div class="value">${n.overdue}</div><div class="label">Currently overdue</div></div><div class="metric"><div class="value">${n.adherence===null?'—':n.adherence+'%'}</div><div class="label">SLA adherence of resolved tickets</div></div></div></div><div class="grid"><div class="card"><h3>Open by priority</h3>${bars(n.byPriority)}</div><div class="card"><h3>Open by status</h3>${bars(n.byStatus)}</div><div class="card full"><h3>Open by category</h3>${bars(n.byCategory)}</div></div>`;
   }
   function bars(rows){const max=Math.max(1,...rows.map(x=>x.count));return rows.length?rows.map(x=>`<div class="bar-row"><div class="bar-name">${esc(x.name)}</div><div class="bar"><span style="width:${x.count/max*100}%"></span></div><div class="bar-count">${x.count}</div></div>`).join(''):'<div class="empty">No open tickets.</div>';}
+
+  function isFresh(entry,ttl){return Boolean(entry&&Date.now()-entry.at<ttl);}
+  function invalidateTicketCaches(){TAB_CACHE.my=null;TAB_CACHE.queue.clear();TAB_CACHE.numbers=null;}
+  function updateQueueCacheTicket(ticket){
+    const queueTicket={ticketId:ticket.ticketId,createdAt:ticket.createdAt,createdAtIso:ticket.createdAtIso,clientName:ticket.clientName,categoryName:ticket.categoryName,emailSubject:ticket.emailSubject,priority:ticket.priority,status:ticket.status,slaStatus:ticket.slaStatus,slaDueAt:ticket.slaDueAt,slaDueAtIso:ticket.slaDueAtIso,raiserEmail:ticket.raiserEmail};
+    TAB_CACHE.queue.forEach(entry=>{const index=entry.data.rows.findIndex(row=>row.ticketId===ticket.ticketId);if(index>=0)entry.data.rows[index]=queueTicket;entry.at=Date.now();});
+    const index=QUEUE.findIndex(row=>row.ticketId===ticket.ticketId);
+    if(index>=0)QUEUE[index]=queueTicket;
+    if(document.getElementById('queuePage').classList.contains('active')){
+      const f=queueFilters();
+      const visible=QUEUE.filter(row=>(f.status==='OPEN'?row.status!=='Resolved':(!f.status||row.status===f.status))&&(!f.priority||row.priority===f.priority)&&(!f.category||row.categoryName===f.category)&&(!f.sla||row.slaStatus===f.sla)&&(!f.search||[row.ticketId,row.clientName,row.emailSubject,row.raiserEmail].join(' ').toLowerCase().includes(f.search.toLowerCase())));
+      renderTable('queueTickets',visible,true);
+    }
+  }
 
   function setBusy(busy,text){const btn=document.getElementById('submitBtn');btn.disabled=busy;btn.innerHTML=busy?`<span class="spinner"></span> ${esc(text)}`:'Check and raise ticket';}
   function loading(){return '<div class="empty"><span class="spinner"></span> Loading...</div>';}
