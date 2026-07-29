@@ -5,6 +5,12 @@
 
 const APP_RELEASE = 'registration-v2';
 const APP_COMMIT = '__APP_COMMIT__';
+let SPREADSHEET_INSTANCE_ = null;
+const CACHE_KEYS_ = Object.freeze({
+  SETTINGS: 'app:settings:v1',
+  CATEGORIES: 'app:categories:v1',
+  NUMBERS: 'app:numbers:v1'
+});
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
@@ -14,10 +20,13 @@ function doGet() {
 
 function getBootstrap() {
   const user = requireUser_();
+  return buildBootstrap_(user);
+}
+
+function buildBootstrap_(user) {
   const settings = getSettings_();
   return {
     user,
-    clients: getActiveClients_(),
     categories: getActiveCategories_(),
     rootCauses: String(settings.ROOT_CAUSES || '').split('|').filter(Boolean),
     duplicateWindowDays: number_(settings.DUPLICATE_WINDOW_DAYS, 5),
@@ -26,7 +35,24 @@ function getBootstrap() {
   };
 }
 
+function getInitialAppState() {
+  const startedAt = Date.now();
+  const email = getVerifiedCompanyEmail_();
+  const users = getSheetObjects_(APP.SHEETS.USERS);
+  const row = users.find(u => lower_(u.Email) === email);
+  let result;
+  if (!row) result = { state: 'REGISTER', email, release: APP_RELEASE };
+  else if (!truthy_(row.Active)) result = { state: 'BLOCKED', email, message: 'Your access has been disabled. Please contact the application administrator.', release: APP_RELEASE };
+  else {
+    const user = userFromRow_(row, email);
+    result = { state: 'ACTIVE', email, name: user.name, role: user.role, bootstrap: buildBootstrap_(user), release: APP_RELEASE };
+  }
+  logPerformance_('getInitialAppState', startedAt, { rows: users.length });
+  return result;
+}
+
 function checkDuplicate(payload) {
+  const startedAt = Date.now();
   const user = requireUser_();
   validateDuplicatePayload_(payload);
   const settings = getSettings_();
@@ -36,8 +62,8 @@ function checkDuplicate(payload) {
   const clientKey = buildClientKeyFromPayload_(payload);
   const normalizedSubject = normalizeSubject_(payload.emailSubject);
 
-  const matches = getSheetObjects_(APP.SHEETS.TICKETS)
-    .filter(t => toDate_(t.Created_At) >= cutoff)
+  const recent = getRecentTicketObjects_(cutoff, 200);
+  const matches = recent.rows
     .filter(t => buildClientKeyFromTicket_(t) === clientKey)
     .filter(t => String(t.Category_ID) === String(payload.categoryId))
     .map(t => ({ ticket: t, similarity: subjectSimilarity_(normalizedSubject, String(t.Normalized_Subject || '')) }))
@@ -53,10 +79,12 @@ function checkDuplicate(payload) {
       canView: user.role !== APP.ROLES.SALES || lower_(x.ticket.Raiser_Email) === user.email
     }));
 
+  logPerformance_('checkDuplicate', startedAt, { rows: recent.processed });
   return { hasDuplicate: matches.length > 0, matches };
 }
 
 function submitTicket(form) {
+  const startedAt = Date.now();
   const user = requireUser_();
   if (!form || typeof form !== 'object') throw new Error('The form data was not received. Please refresh and try again.');
 
@@ -121,6 +149,7 @@ function submitTicket(form) {
 
     appendObject_(APP.SHEETS.TICKETS, ticket);
     appendEvent_(ticketId, 'TICKET_RAISED', '', APP.STATUS.RAISED, user.email, duplicateOverride ? 'Raised despite duplicate warning.' : '');
+    removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
   } finally {
     lock.releaseLock();
   }
@@ -131,29 +160,55 @@ function submitTicket(form) {
   } catch (err) {
     console.error('Slack alert failed: ' + err.message);
   }
+  logPerformance_('submitTicket', startedAt, { rows: 1 });
   return detail;
 }
 
 function getMyTickets() {
+  const startedAt = Date.now();
   const user = requireUser_();
   const settings = getSettings_();
   const cutoff = new Date(Date.now() - number_(settings.RESOLVED_VISIBILITY_DAYS, 10) * 24 * 60 * 60 * 1000);
 
-  return getSheetObjects_(APP.SHEETS.TICKETS)
+  const tickets = getSheetObjects_(APP.SHEETS.TICKETS);
+  const result = tickets
     .filter(t => lower_(t.Raiser_Email) === user.email)
     .filter(t => String(t.Status) !== APP.STATUS.RESOLVED || toDate_(t.Resolved_At) >= cutoff)
     .sort((a, b) => toDate_(b.Created_At) - toDate_(a.Created_At))
     .map(serializeTicket_);
+  logPerformance_('getMyTickets', startedAt, { rows: tickets.length });
+  return result;
 }
 
-function getQueueTickets() {
+function getQueueTickets(filters) {
+  const startedAt = Date.now();
   requireRole_([APP.ROLES.POC, APP.ROLES.ADMIN]);
-  return getSheetObjects_(APP.SHEETS.TICKETS)
-    .sort((a, b) => queueSort_(a, b))
-    .map(serializeTicket_);
+  filters = filters || {};
+  const pageSize = Math.min(100, Math.max(1, Math.floor(number_(filters.pageSize, 50))));
+  const requestedPage = Math.max(1, Math.floor(number_(filters.page, 1)));
+  const search = lower_(filters.search);
+  const status = filters.status === undefined ? 'OPEN' : String(filters.status);
+  const priority = String(filters.priority || '');
+  const category = String(filters.category || '');
+  const sla = String(filters.sla || '');
+  const tickets = getSheetObjects_(APP.SHEETS.TICKETS);
+  const filtered = tickets.filter(t => {
+    const serialized = serializeQueueTicket_(t);
+    return (!search || [serialized.ticketId, serialized.clientName, serialized.emailSubject, serialized.raiserEmail].join(' ').toLowerCase().includes(search)) &&
+      (status === 'OPEN' ? serialized.status !== APP.STATUS.RESOLVED : (!status || serialized.status === status)) &&
+      (!priority || serialized.priority === priority) && (!category || serialized.categoryName === category) && (!sla || serialized.slaStatus === sla);
+  }).sort(queueSort_);
+  const totalRows = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const rows = filtered.slice((page - 1) * pageSize, page * pageSize).map(serializeQueueTicket_);
+  const result = { rows, page, pageSize, totalRows, totalPages, categories: getActiveCategories_().map(c => c.name).filter((v, i, a) => a.indexOf(v) === i).sort() };
+  logPerformance_('getQueueTickets', startedAt, { rows: tickets.length });
+  return result;
 }
 
 function getTicketDetail(ticketId) {
+  const startedAt = Date.now();
   const user = requireUser_();
   const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', ticketId);
   if (!found) throw new Error('Ticket not found.');
@@ -173,10 +228,12 @@ function getTicketDetail(ticketId) {
       createdAt: formatDateTime_(e.Created_At),
       note: String(e.Note || '')
     }));
+  logPerformance_('getTicketDetail', startedAt, { rows: 1 });
   return result;
 }
 
 function updateTicketStatus(payload) {
+  const startedAt = Date.now();
   const user = requireRole_([APP.ROLES.POC, APP.ROLES.ADMIN]);
   if (!payload || !payload.ticketId || !payload.newStatus) throw new Error('Ticket and new status are required.');
 
@@ -225,14 +282,23 @@ function updateTicketStatus(payload) {
     updateObjectRow_(APP.SHEETS.TICKETS, found.rowNumber, changes);
     appendEvent_(payload.ticketId, 'STATUS_CHANGED', oldStatus, newStatus, user.email,
       newStatus === APP.STATUS.RESOLVED ? `${changes.Root_Cause}: ${changes.Resolution_Note}` : '');
+    removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
   } finally {
     lock.releaseLock();
   }
-  return getTicketDetail(payload.ticketId);
+  const result = getTicketDetail(payload.ticketId);
+  logPerformance_('updateTicketStatus', startedAt, { rows: 1 });
+  return result;
 }
 
 function getNumbers() {
+  const startedAt = Date.now();
   requireRole_([APP.ROLES.POC, APP.ROLES.ADMIN]);
+  const cached = getCachedJson_(CACHE_KEYS_.NUMBERS);
+  if (cached !== null) {
+    logPerformance_('getNumbers', startedAt, { cache: 'hit' });
+    return cached;
+  }
   const settings = getSettings_();
   const days = number_(settings.DASHBOARD_WINDOW_DAYS, 14);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -246,7 +312,7 @@ function getNumbers() {
   const met = resolvedInWindow.filter(t => toDate_(t.Resolved_At) <= toDate_(t.SLA_Due_At)).length;
   const adherence = resolvedInWindow.length ? Math.round((met / resolvedInWindow.length) * 1000) / 10 : null;
 
-  return {
+  const result = {
     days,
     raised: raisedInWindow.length,
     resolved: resolvedInWindow.length,
@@ -257,6 +323,9 @@ function getNumbers() {
     byPriority: countBy_(open, 'Priority'),
     byCategory: countBy_(open, 'Category_Name')
   };
+  putCachedJson_(CACHE_KEYS_.NUMBERS, result, 60);
+  logPerformance_('getNumbers', startedAt, { rows: tickets.length, cache: 'miss' });
+  return result;
 }
 
 function setSlackWebhookFromEditor() {
@@ -339,15 +408,27 @@ function registerFirstTimeUser(payload) {
 
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
+  let registeredRow;
   try {
     const existing = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email);
     if (!existing) {
-      appendObject_(APP.SHEETS.USERS, { Email: email, Name: name, Role: role, Active: true });
+      registeredRow = { Email: email, Name: name, Role: role, Active: true };
+      appendObject_(APP.SHEETS.USERS, registeredRow);
+    } else {
+      registeredRow = existing;
     }
   } finally {
     lock.releaseLock();
   }
-  return getEntryState();
+  if (!truthy_(registeredRow.Active)) return { state: 'BLOCKED', email, message: 'Your access has been disabled. Please contact the application administrator.', release: APP_RELEASE };
+  const user = userFromRow_(registeredRow, email);
+  return { state: 'ACTIVE', email, name: user.name, role: user.role, bootstrap: buildBootstrap_(user), release: APP_RELEASE };
+}
+
+function userFromRow_(row, email) {
+  const role = String(row.Role || '').toUpperCase();
+  if (!Object.values(APP.ROLES).includes(role)) throw new Error('Your role in the Users sheet is invalid. Use SALES, POC or ADMIN.');
+  return { email, name: String(row.Name || email.split('@')[0]), role };
 }
 
 function requireUser_() {
@@ -356,9 +437,7 @@ function requireUser_() {
   const row = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email && truthy_(u.Active));
   if (!row) throw new Error('You do not have access yet. Ask the app administrator to add your email to the Users sheet.');
 
-  const role = String(row.Role || '').toUpperCase();
-  if (!Object.values(APP.ROLES).includes(role)) throw new Error('Your role in the Users sheet is invalid. Use SALES, POC or ADMIN.');
-  return { email, name: String(row.Name || email.split('@')[0]), role };
+  return userFromRow_(row, email);
 }
 
 function requireRole_(roles) {
@@ -489,14 +568,19 @@ function sendSlackAlert_(ticket) {
 // -------------------- Sheet helpers --------------------
 
 function getSpreadsheet_() {
+  if (SPREADSHEET_INSTANCE_) return SPREADSHEET_INSTANCE_;
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!id) throw new Error('System is not configured. Run setupSystem() first.');
-  return SpreadsheetApp.openById(id);
+  SPREADSHEET_INSTANCE_ = SpreadsheetApp.openById(id);
+  return SPREADSHEET_INSTANCE_;
 }
 
 function getSettings_() {
+  const cached = getCachedJson_(CACHE_KEYS_.SETTINGS);
+  if (cached !== null) return cached;
   const settings = {};
   getSheetObjects_(APP.SHEETS.SETTINGS).forEach(r => { settings[String(r.Key)] = String(r.Value); });
+  putCachedJson_(CACHE_KEYS_.SETTINGS, settings, 300);
   return settings;
 }
 
@@ -509,7 +593,9 @@ function getActiveClients_() {
 }
 
 function getActiveCategories_() {
-  return getSheetObjects_(APP.SHEETS.CATEGORIES)
+  const cached = getCachedJson_(CACHE_KEYS_.CATEGORIES);
+  if (cached !== null) return cached;
+  const categories = getSheetObjects_(APP.SHEETS.CATEGORIES)
     .filter(r => truthy_(r.Active))
     .map(r => ({
       id: String(r.Category_ID),
@@ -520,6 +606,8 @@ function getActiveCategories_() {
       fields: safeJsonParse_(r.Fields_JSON, []),
       requiredFields: safeJsonParse_(r.Required_Fields_JSON, [])
     }));
+  putCachedJson_(CACHE_KEYS_.CATEGORIES, categories, 300);
+  return categories;
 }
 
 function getCategoryById_(id) {
@@ -530,7 +618,10 @@ function getCategoryById_(id) {
 function getSheetObjects_(sheetName) {
   const sheet = getSpreadsheet_().getSheetByName(sheetName);
   if (!sheet) throw new Error(`Missing sheet: ${sheetName}`);
-  const values = sheet.getDataRange().getValues();
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 2 || lastColumn < 1) return [];
+  const values = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
   if (values.length < 2) return [];
   const headers = values[0].map(String);
   return values.slice(1)
@@ -546,15 +637,18 @@ function appendObject_(sheetName, object) {
 
 function findObjectRow_(sheetName, key, value) {
   const sheet = getSpreadsheet_().getSheetByName(sheetName);
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) return null;
-  const headers = data[0].map(String);
+  const lastColumn = sheet.getLastColumn();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2 || lastColumn < 1) return null;
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(String);
   const keyIndex = headers.indexOf(key);
   if (keyIndex < 0) throw new Error(`Column ${key} not found in ${sheetName}.`);
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][keyIndex]) === String(value)) {
-      const object = headers.reduce((obj, h, j) => { obj[h] = data[i][j]; return obj; }, {});
-      return { rowNumber: i + 1, object };
+  const keys = sheet.getRange(2, keyIndex + 1, lastRow - 1, 1).getValues();
+  for (let i = 0; i < keys.length; i++) {
+    if (String(keys[i][0]) === String(value)) {
+      const row = sheet.getRange(i + 2, 1, 1, lastColumn).getValues()[0];
+      const object = headers.reduce((obj, h, j) => { obj[h] = row[j]; return obj; }, {});
+      return { rowNumber: i + 2, object };
     }
   }
   return null;
@@ -563,11 +657,11 @@ function findObjectRow_(sheetName, key, value) {
 function updateObjectRow_(sheetName, rowNumber, changes) {
   const sheet = getSpreadsheet_().getSheetByName(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
-  Object.keys(changes).forEach(key => {
-    const col = headers.indexOf(key) + 1;
-    if (!col) throw new Error(`Column ${key} not found in ${sheetName}.`);
-    sheet.getRange(rowNumber, col).setValue(changes[key]);
-  });
+  Object.keys(changes).forEach(key => { if (headers.indexOf(key) < 0) throw new Error(`Column ${key} not found in ${sheetName}.`); });
+  const range = sheet.getRange(rowNumber, 1, 1, headers.length);
+  const row = range.getValues()[0];
+  Object.keys(changes).forEach(key => { row[headers.indexOf(key)] = changes[key]; });
+  range.setValues([row]);
 }
 
 function appendEvent_(ticketId, type, oldValue, newValue, performedBy, note) {
@@ -636,6 +730,16 @@ function serializeTicket_(t) {
   };
 }
 
+function serializeQueueTicket_(t) {
+  const full = serializeTicket_(t);
+  return {
+    ticketId: full.ticketId, createdAt: full.createdAt, createdAtIso: full.createdAtIso,
+    clientName: full.clientName, categoryName: full.categoryName, emailSubject: full.emailSubject,
+    priority: full.priority, status: full.status, slaStatus: full.slaStatus,
+    slaDueAt: full.slaDueAt, slaDueAtIso: full.slaDueAtIso, raiserEmail: full.raiserEmail
+  };
+}
+
 function queueSort_(a, b) {
   const statusRank = t => String(t.Status) === APP.STATUS.RESOLVED ? 2 : (toDate_(t.SLA_Due_At) < new Date() ? 0 : 1);
   const sr = statusRank(a) - statusRank(b);
@@ -666,6 +770,45 @@ function extractDynamicFields_(form, category) {
 }
 
 // -------------------- Duplicate matching --------------------
+
+function getRecentTicketObjects_(cutoff, batchSize) {
+  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.TICKETS);
+  if (!sheet) throw new Error(`Missing sheet: ${APP.SHEETS.TICKETS}`);
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow < 2 || lastColumn < 1) return { rows: [], processed: 0 };
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(String);
+  const createdIndex = headers.indexOf('Created_At');
+  if (createdIndex < 0) throw new Error(`Column Created_At not found in ${APP.SHEETS.TICKETS}.`);
+  const rows = [];
+  let endRow = lastRow;
+  let processed = 0;
+  let previousDate = null;
+  let mustFallback = false;
+  while (endRow >= 2) {
+    const count = Math.min(batchSize || 200, endRow - 1);
+    const startRow = endRow - count + 1;
+    const values = sheet.getRange(startRow, 1, count, lastColumn).getValues();
+    processed += values.length;
+    let reachedCutoff = false;
+    for (let i = values.length - 1; i >= 0; i--) {
+      const rawDate = values[i][createdIndex];
+      const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
+      if (isNaN(date.getTime()) || (previousDate && date > previousDate)) { mustFallback = true; break; }
+      previousDate = date;
+      if (date < cutoff) { reachedCutoff = true; break; }
+      rows.push(headers.reduce((obj, h, j) => { obj[h] = values[i][j]; return obj; }, {}));
+    }
+    if (mustFallback) break;
+    if (reachedCutoff) return { rows, processed };
+    endRow = startRow - 1;
+  }
+  if (mustFallback) {
+    const all = getSheetObjects_(APP.SHEETS.TICKETS);
+    return { rows: all.filter(t => toDate_(t.Created_At) >= cutoff), processed: all.length };
+  }
+  return { rows, processed };
+}
 
 function buildClientKeyFromPayload_(payload) {
   const clientId = String(payload.clientId == null ? '' : payload.clientId).trim();
@@ -716,6 +859,33 @@ function fieldLabel_(key) {
 
 function safeJsonParse_(value, fallback) {
   try { return JSON.parse(String(value || '')); } catch (err) { return fallback; }
+}
+
+function getCachedJson_(key) {
+  try {
+    const value = CacheService.getScriptCache().get(key);
+    return value === null ? null : JSON.parse(value);
+  } catch (err) {
+    console.warn('Cache read unavailable for key ' + key);
+    return null;
+  }
+}
+
+function putCachedJson_(key, value, seconds) {
+  try { CacheService.getScriptCache().put(key, JSON.stringify(value), seconds); }
+  catch (err) { console.warn('Cache write unavailable for key ' + key); }
+}
+
+function removeCachedKeys_(keys) {
+  try { CacheService.getScriptCache().removeAll(keys); }
+  catch (err) { console.warn('Cache invalidation unavailable'); }
+}
+
+function logPerformance_(functionName, startedAt, metadata) {
+  const safe = { functionName, durationMs: Date.now() - startedAt };
+  if (metadata && metadata.rows !== undefined) safe.rows = metadata.rows;
+  if (metadata && metadata.cache !== undefined) safe.cache = metadata.cache;
+  console.log(JSON.stringify(safe));
 }
 
 function cleanText_(value, maxLength) {
