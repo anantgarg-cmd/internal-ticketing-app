@@ -5,6 +5,7 @@ on:
     branches:
       - develop
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,6 +31,7 @@ jobs:
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
+          [[ -n "$CLASPRC_JSON" ]] || { echo 'clasp authentication credentials are missing.' >&2; exit 1; }
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
           chmod 600 "$HOME/.clasprc.json"
 
@@ -40,13 +42,50 @@ jobs:
           DEPLOYMENT_ID_DEV: ${{ secrets.DEPLOYMENT_ID_DEV }}
           DEPLOYMENT_ID_PROD: ${{ secrets.DEPLOYMENT_ID_PROD }}
         run: |
+          set -euo pipefail
           if [[ "$GITHUB_REF_NAME" == "develop" ]]; then
-            printf '%s' "$CLASP_JSON_DEV" > .clasp.json
-            printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID_DEV" >> "$GITHUB_ENV"
+            environment_name=Development
+            clasp_json=$CLASP_JSON_DEV
+            deployment_id=$DEPLOYMENT_ID_DEV
+          elif [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            environment_name=Production
+            clasp_json=$CLASP_JSON_PROD
+            deployment_id=$DEPLOYMENT_ID_PROD
           else
-            printf '%s' "$CLASP_JSON_PROD" > .clasp.json
-            printf 'DEPLOYMENT_ID=%s\n' "$DEPLOYMENT_ID_PROD" >> "$GITHUB_ENV"
+            echo "Unsupported deployment branch: $GITHUB_REF_NAME" >&2
+            exit 1
           fi
+          [[ -n "$clasp_json" ]] || { echo 'Selected .clasp.json secret is missing.' >&2; exit 1; }
+          [[ -n "$deployment_id" ]] || { echo 'Selected deployment ID is missing.' >&2; exit 1; }
+          printf '%s' "$clasp_json" > .clasp.json
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('.clasp.json','utf8')); if(typeof p.scriptId!=='string'||!p.scriptId.trim()) throw new Error('scriptId is missing from .clasp.json');"
+          script_id=$(node -p "require('./.clasp.json').scriptId")
+          printf 'ENVIRONMENT_NAME=%s\nDEPLOYMENT_ID=%s\nSCRIPT_ID=%s\n' "$environment_name" "$deployment_id" "$script_id" >> "$GITHUB_ENV"
+          echo "Environment: $environment_name"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Commit: $GITHUB_SHA"
+          echo 'Script ID present: yes'
+          echo 'Deployment ID present: yes'
+
+      - name: Stamp commit marker
+        run: |
+          short_sha=${GITHUB_SHA:0:7}
+          sed -i "s/__APP_COMMIT__/$short_sha/g" Code.js Index.html
+
+      - name: Validate clasp authentication
+        run: npx clasp show-authorized-user >/dev/null
+
+      - name: Verify deployment belongs to selected script
+        run: |
+          set -euo pipefail
+          deployments=$(npx clasp deployments "$SCRIPT_ID")
+          if ! printf '%s\n' "$deployments" | grep -Fq "$DEPLOYMENT_ID"; then
+            echo 'Configured deployment ID does not belong to the selected Apps Script project.' >&2
+            exit 1
+          fi
+
+      - name: Show files selected for push
+        run: npx clasp status
 
       - name: Push Apps Script files
         run: npx clasp push --force
@@ -54,17 +93,35 @@ jobs:
       - name: Create Apps Script version
         id: version
         run: |
+          set -euo pipefail
           output=$(npx clasp version "Automated deployment from ${GITHUB_SHA}")
           version=$(printf '%s\n' "$output" | sed -nE 's/.*[Vv]ersion ([0-9]+).*/\1/p' | tail -n 1)
           if [[ -z "$version" ]]; then
-            printf 'Unable to determine Apps Script version from clasp output.\n' >&2
+            printf 'Version creation succeeded but its number could not be determined.\n' >&2
             exit 1
           fi
           printf 'number=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
       - name: Update existing deployment
-        run: >-
-          npx clasp deploy
-          --deploymentId "$DEPLOYMENT_ID"
-          --versionNumber "${{ steps.version.outputs.number }}"
-          --description "Automated deployment from ${GITHUB_SHA}"
+        run: |
+          npx clasp redeploy "$DEPLOYMENT_ID" \
+            --versionNumber "${{ steps.version.outputs.number }}" \
+            --description "Automated deployment from ${GITHUB_SHA}"
+
+      - name: List and verify updated deployment
+        run: |
+          set -euo pipefail
+          deployments=$(npx clasp deployments "$SCRIPT_ID")
+          printf '%s\n' "$deployments"
+          printf '%s\n' "$deployments" | grep -Fq "$DEPLOYMENT_ID" || {
+            echo 'Updated deployment was not found in the selected Apps Script project.' >&2
+            exit 1
+          }
+
+      - name: Deployment success summary
+        run: |
+          echo "Environment: $ENVIRONMENT_NAME"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Commit: $GITHUB_SHA"
+          echo "New Apps Script version: ${{ steps.version.outputs.number }}"
+          echo 'Deployment update success: yes'
