@@ -4,7 +4,7 @@
   "description": "",
   "main": "Code.js",
   "scripts": {
-    "test": "node test/working-sla.test.js && node test/schema-recovery.test.js && node test/client-size-performance.test.js && node test/slack-notifications.test.js && node test/stability-contract.test.js && node test/reliability-audit.test.js && node test/sales-tickets-search-loader.test.js"
+    "test": "node test/working-sla.test.js && node test/schema-recovery.test.js && node test/client-size-performance.test.js && node test/slack-notifications.test.js && node test/stability-contract.test.js && node test/reliability-audit.test.js && node test/sales-tickets-search-loader.test.js && node test/world-class-ui.test.js"
   },
   "keywords": [],
   "author": "",
