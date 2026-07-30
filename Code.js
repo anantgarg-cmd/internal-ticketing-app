@@ -105,7 +105,7 @@ function submitTicket(form) {
 
     const createdAt = new Date();
     const slaHours = number_(category.SLA_Hours, 24);
-    const slaDueAt = new Date(createdAt.getTime() + slaHours * 60 * 60 * 1000);
+    const slaDueAt = calculateWorkingSlaDueAt_(createdAt, slaHours);
     const subject = cleanText_(form.emailSubject, 300);
     const dynamicFields = extractDynamicFields_(form, category);
     const duplicateIds = cleanText_(form.duplicateIds || '', 500);
@@ -162,6 +162,15 @@ function submitTicket(form) {
   }
   logPerformance_('submitTicket', startedAt, { rows: 1 });
   return detail;
+}
+
+/** Returns a server-calculated SLA estimate for the Raise Ticket form. */
+function getSlaDuePreview(categoryId) {
+  requireUser_();
+  const category = getCategoryById_(categoryId);
+  if (!category) throw new Error('The selected category is no longer active. Refresh the page and choose again.');
+  const dueAt = calculateWorkingSlaDueAt_(new Date(), number_(category.SLA_Hours, 24));
+  return { dueAt: formatDateTime_(dueAt), dueAtIso: dueAt.toISOString() };
 }
 
 function getMyTickets() {
@@ -687,6 +696,115 @@ function nextTicketId_() {
 }
 
 // -------------------- Serialisation and calculations --------------------
+
+const SLA_WORK_START_HOUR_ = 11;
+const SLA_WORK_START_MINUTE_ = 30;
+const SLA_WORK_END_HOUR_ = 19;
+const SLA_WORK_END_MINUTE_ = 30;
+
+/** Builds an instant from calendar fields in the application's configured timezone. */
+function dateInAppTimezone_(year, month, day, hour, minute, second, millisecond) {
+  const approximate = new Date(Date.UTC(year, month - 1, day, hour, minute, second || 0, millisecond || 0));
+  const offsetText = Utilities.formatDate(approximate, APP.TZ, 'Z');
+  const sign = offsetText.charAt(0) === '-' ? -1 : 1;
+  const offsetMinutes = sign * (number_(offsetText.slice(1, 3), 0) * 60 + number_(offsetText.slice(3, 5), 0));
+  return new Date(approximate.getTime() - offsetMinutes * 60000);
+}
+
+function appDateParts_(date) {
+  return Utilities.formatDate(toDate_(date), APP.TZ, 'yyyy,M,d,H,m,s,S').split(',').map(Number);
+}
+
+function isWorkingDay_(date) {
+  return !['Sat', 'Sun'].includes(Utilities.formatDate(toDate_(date), APP.TZ, 'EEE'));
+}
+
+function getWorkingDayStart_(date) {
+  const p = appDateParts_(date);
+  return dateInAppTimezone_(p[0], p[1], p[2], SLA_WORK_START_HOUR_, SLA_WORK_START_MINUTE_, 0, 0);
+}
+
+function getWorkingDayEnd_(date) {
+  const p = appDateParts_(date);
+  return dateInAppTimezone_(p[0], p[1], p[2], SLA_WORK_END_HOUR_, SLA_WORK_END_MINUTE_, 0, 0);
+}
+
+/** Moves a time outside the schedule to the next opening of a working window. */
+function moveToNextWorkingStart_(date) {
+  let candidate = toDate_(date);
+  if (isWorkingDay_(candidate) && candidate < getWorkingDayStart_(candidate)) return getWorkingDayStart_(candidate);
+
+  // Noon is safely within the same local calendar day when stepping through dates.
+  let p = appDateParts_(candidate);
+  candidate = dateInAppTimezone_(p[0], p[1], p[2] + 1, 12, 0, 0, 0);
+  while (!isWorkingDay_(candidate)) {
+    p = appDateParts_(candidate);
+    candidate = dateInAppTimezone_(p[0], p[1], p[2] + 1, 12, 0, 0, 0);
+  }
+  return getWorkingDayStart_(candidate);
+}
+
+/** Adds SLA hours only within Monday-Friday, 11:30-19:30 in APP.TZ. */
+function calculateWorkingSlaDueAt_(createdAt, slaHours) {
+  let cursor = toDate_(createdAt);
+  let remainingMs = Math.max(0, number_(slaHours, 0)) * 60 * 60 * 1000;
+
+  if (!isWorkingDay_(cursor) || cursor >= getWorkingDayEnd_(cursor)) cursor = moveToNextWorkingStart_(cursor);
+  else if (cursor < getWorkingDayStart_(cursor)) cursor = getWorkingDayStart_(cursor);
+  if (remainingMs === 0) return cursor;
+
+  while (remainingMs > 0) {
+    const availableMs = getWorkingDayEnd_(cursor).getTime() - cursor.getTime();
+    if (remainingMs < availableMs) return new Date(cursor.getTime() + remainingMs);
+    remainingMs -= availableMs;
+    cursor = moveToNextWorkingStart_(cursor);
+  }
+  // An SLA ending exactly at closing is represented by the next working opening.
+  return cursor;
+}
+
+/**
+ * Optional editor/admin migration. Recalculates only currently open tickets.
+ * This function is never invoked by application startup or ticket creation.
+ */
+function recalculateOpenTicketSlaDueDates() {
+  const user = requireRole_([APP.ROLES.ADMIN]);
+  const tickets = getSheetObjects_(APP.SHEETS.TICKETS);
+  let updated = 0;
+  tickets.forEach(ticket => {
+    if (String(ticket.Status) === APP.STATUS.RESOLVED) return;
+    const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', ticket.Ticket_ID);
+    updateObjectRow_(APP.SHEETS.TICKETS, found.rowNumber, {
+      SLA_Due_At: calculateWorkingSlaDueAt_(ticket.Created_At, number_(ticket.SLA_Hours, 0)),
+      Updated_At: new Date(),
+      Updated_By: user.email
+    });
+    updated++;
+  });
+  removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
+  return { updated };
+}
+
+/** Logs the required non-mutating SLA examples and returns their results. */
+function diagnoseWorkingSlaCalculation() {
+  const cases = [
+    ['Monday before opening', '2026-08-03T10:00:00+05:30', 4, '2026-08-03T15:30:00+05:30'],
+    ['Monday at opening', '2026-08-03T11:30:00+05:30', 4, '2026-08-03T15:30:00+05:30'],
+    ['Monday evening', '2026-08-03T18:30:00+05:30', 4, '2026-08-04T14:30:00+05:30'],
+    ['Friday evening', '2026-08-07T18:30:00+05:30', 4, '2026-08-10T14:30:00+05:30'],
+    ['Friday 19:29', '2026-08-07T19:29:00+05:30', 4, '2026-08-10T15:29:00+05:30'],
+    ['Friday closing', '2026-08-07T19:30:00+05:30', 4, '2026-08-10T15:30:00+05:30'],
+    ['Saturday', '2026-08-08T13:00:00+05:30', 4, '2026-08-10T15:30:00+05:30'],
+    ['Sixteen hours', '2026-08-03T11:30:00+05:30', 16, '2026-08-05T11:30:00+05:30']
+  ];
+  const results = cases.map(test => {
+    const actual = calculateWorkingSlaDueAt_(new Date(test[1]), test[2]);
+    const expected = new Date(test[3]);
+    return { name: test[0], expected: expected.toISOString(), actual: actual.toISOString(), passed: actual.getTime() === expected.getTime() };
+  });
+  results.forEach(result => console.log(JSON.stringify(result)));
+  return results;
+}
 
 function serializeTicket_(t) {
   const now = new Date();

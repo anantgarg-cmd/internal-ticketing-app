@@ -228,7 +228,9 @@
       (type==='file'?evidenceBox:box).insertAdjacentHTML('beforeend',`<div class="${type==='textarea'?'full':''}"><label class="${required?'required':''}">${esc(label)}</label>${input}</div>`);
     });
     document.getElementById('summaryPriority').textContent=cat.priority; document.getElementById('summarySla').textContent=`${cat.slaHours} hours`;
-    document.getElementById('summaryDue').textContent=new Date(Date.now()+cat.slaHours*3600000).toLocaleString('en-IN'); document.getElementById('slaSummary').style.display='block';
+    const due=document.getElementById('summaryDue'); due.textContent='Calculating…'; document.getElementById('slaSummary').style.display='block';
+    const categoryId=cat.id;
+    google.script.run.withSuccessHandler(result=>{if(document.getElementById('categoryId').value===categoryId)due.textContent=result.dueAt;}).withFailureHandler(err=>{if(document.getElementById('categoryId').value===categoryId){due.textContent='Unavailable';showError(err);}}).getSlaDuePreview(categoryId);
   }
 
   function beginSubmit(e){
