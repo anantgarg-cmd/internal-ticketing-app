@@ -1,0 +1,14 @@
+**/test/**
+**/tests/**
+**/*.test.js
+**/*.test.gs
+**/*.spec.js
+**/*.spec.gs
+node_modules/**
+package.json
+package-lock.json
+README.md
+.github/**
+.git/**
+.gitignore
+.claspignore

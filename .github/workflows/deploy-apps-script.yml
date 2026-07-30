@@ -84,8 +84,39 @@ jobs:
             exit 1
           fi
 
-      - name: Show files selected for push
-        run: npx clasp status
+      - name: Validate files selected for push
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # clasp 3.3 reports upload candidates under "Tracked files:".
+          status_output=$(npx clasp status)
+          mapfile -t upload_files < <(
+            printf '%s\n' "$status_output" |
+              sed -n '/^Tracked files:$/,/^Untracked files:$/ { /^└─ /s/^└─ //p; }'
+          )
+
+          if (( ${#upload_files[@]} == 0 )); then
+            echo 'clasp did not select any files for upload.' >&2
+            exit 1
+          fi
+
+          forbidden_path='(^|/)(test|tests)/|\.(test|spec)\.(js|gs)$|(^|/)(package(-lock)?\.json)$|(^|/)node_modules/|(^|/)\.github/'
+          node_syntax='require[[:space:]]*\(|module\.exports|exports\.|describe[[:space:]]*\(|expect[[:space:]]*\('
+
+          for file in "${upload_files[@]}"; do
+            if [[ "$file" =~ $forbidden_path ]]; then
+              printf 'Unsafe development file selected by clasp: %s\n' "$file" >&2
+              exit 1
+            fi
+            if [[ "$file" == *.js ]] && grep -En "$node_syntax" -- "$file"; then
+              printf 'Node-only syntax found in Apps Script upload: %s\n' "$file" >&2
+              exit 1
+            fi
+          done
+
+          echo 'Safe files selected for Apps Script upload:'
+          printf '  %s\n' "${upload_files[@]}"
 
       - name: Push Apps Script files
         run: npx clasp push --force
