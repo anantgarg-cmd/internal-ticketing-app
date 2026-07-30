@@ -38,6 +38,9 @@ function authorizeApplication() {
   DriveApp.getRootFolder().getId();
   UrlFetchApp.fetch('https://www.google.com/generate_204', { muteHttpExceptions: true });
 
+  // Reading the trigger collection is a safe authorization diagnostic; it does not create a trigger.
+  ScriptApp.getProjectTriggers();
+
   const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
   if (!email.endsWith('@shadowfax.in')) {
     throw new Error('Authorization must be completed by a @shadowfax.in deployment-owner account.');
@@ -48,6 +51,7 @@ function authorizeApplication() {
     spreadsheetAccessible: true,
     driveAccessible: true,
     externalRequestAccessible: true,
+    triggerManagementAuthorized: true,
     companyDomainValid: true,
     timestamp: new Date().toISOString()
   };
@@ -467,14 +471,6 @@ function getNumbers() {
   return result;
 }
 
-function setSlackWebhookFromEditor() {
-  // Replace the placeholder temporarily, run once, and then remove the URL from the code before saving again.
-  const webhookUrl = 'PASTE_SLACK_WEBHOOK_URL_HERE';
-  if (!webhookUrl.startsWith('https://hooks.slack.com/')) throw new Error('Paste a valid Slack incoming webhook URL first.');
-  PropertiesService.getScriptProperties().setProperty('SLACK_WEBHOOK_URL', webhookUrl);
-  return 'Slack webhook saved securely in Script Properties. Remove it from this function now.';
-}
-
 function setWebAppUrlFromEditor() {
   // After deployment, paste the /exec URL here, run once, then remove it from the code.
   const webAppUrl = 'PASTE_DEPLOYED_EXEC_URL_HERE';
@@ -686,59 +682,18 @@ function hasFile_(blob) {
 // -------------------- Slack --------------------
 
 function sendSlackAlert_(ticket) {
-  const settings = getSettings_();
-  const alertPriorities = String(settings.ALERT_PRIORITIES || 'HIGH')
-    .split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
-  if (!alertPriorities.includes(String(ticket.priority).toUpperCase())) return;
-
-  const props = PropertiesService.getScriptProperties();
-  const webhook = props.getProperty('SLACK_WEBHOOK_URL');
-  if (!webhook) return;
-  const appUrl = props.getProperty('WEB_APP_URL') || ScriptApp.getService().getUrl() || '';
-  const due = ticket.slaDueAt;
-  const text = [
-    `🚨 *${ticket.priority}-Priority Internal Ticket Raised*`,
-    `*Ticket:* ${ticket.ticketId}`,
-    `*Client:* ${ticket.clientName} (${ticket.clientType})`,
-    ticket.clientSize ? `*Client Size:* ${ticket.clientSize}` : '',
-    `*Category:* ${ticket.categoryName}`,
-    `*Subject:* ${ticket.emailSubject}`,
-    `*Raised by:* ${ticket.raiserEmail}`,
-    `*Resolution SLA:* ${ticket.slaHours} hours`,
-    `*Due by:* ${due}`,
-    appUrl ? `*Open app:* ${appUrl}` : ''
-  ].filter(Boolean).join('\n');
-
-  let response;
-  try {
-    response = UrlFetchApp.fetch(webhook, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify({ text }),
-      muteHttpExceptions: true
-    });
-  } catch (err) {
-    throwServiceAuthorizationError_(err);
-  }
-  if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) {
-    throw new Error(`Slack returned ${response.getResponseCode()}: ${response.getContentText()}`);
-  }
+  if (!slackPriorityConfigured_(ticket.priority, 'SLACK_ALERT_PRIORITIES')) return { enqueued: false, duplicate: false };
+  return enqueueSlackNotification_({ notificationType: 'NEW_HIGH_PRIORITY', dedupeKey: 'NEW_HIGH:' + ticket.ticketId,
+    ticketId: ticket.ticketId, slaCycleNumber: number_(ticket.slaCycleNumber, 1), priority: ticket.priority,
+    payload: buildNewHighPrioritySlackPayload_(ticket) });
 }
 
 function sendSlackReopenedAlert_(ticket, reopenedBy, reason) {
-  const webhook = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
-  if (!webhook) return;
-  const appUrl = PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || ScriptApp.getService().getUrl() || '';
-  const text = [
-    '🔄 *Internal Ticket Reopened*', `*Ticket:* ${ticket.ticketId}`, `*Client:* ${ticket.clientName}`,
-    `*Category:* ${ticket.categoryName}`, `*Priority:* ${ticket.priority}`, `*Reopened by:* ${reopenedBy}`,
-    `*Reason:* ${reason}`, `*New SLA due:* ${ticket.slaDueAt}`, appUrl ? `*Open app:* ${appUrl}` : ''
-  ].filter(Boolean).join('\n');
-  let response;
-  try {
-    response = UrlFetchApp.fetch(webhook, { method: 'post', contentType: 'application/json', payload: JSON.stringify({ text }), muteHttpExceptions: true });
-  } catch (err) { throwServiceAuthorizationError_(err); }
-  if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) throw new Error(`Slack returned ${response.getResponseCode()}.`);
+  if (!slackPriorityConfigured_(ticket.priority, 'SLACK_ALERT_PRIORITIES')) return { enqueued: false, duplicate: false };
+  const cycle = number_(ticket.slaCycleNumber, 1);
+  return enqueueSlackNotification_({ notificationType: 'REOPENED_HIGH_PRIORITY', dedupeKey: 'REOPEN_HIGH:' + ticket.ticketId + ':' + cycle,
+    ticketId: ticket.ticketId, slaCycleNumber: cycle, priority: ticket.priority,
+    payload: buildReopenedHighPrioritySlackPayload_(ticket, reopenedBy, reason) });
 }
 
 // -------------------- Sheet helpers --------------------
@@ -1475,3 +1430,127 @@ function getCategoryById_(id) {
   const category=getActiveCategories_().find(item=>String(item.id)===String(id));
   return category ? {Category_ID:category.id,Client_Type:category.clientType,Category_Name:category.name,Priority:category.priority,SLA_Hours:category.slaHours,Fields_JSON:JSON.stringify(category.fields),Required_Fields_JSON:JSON.stringify(category.requiredFields),Active:true} : null;
 }
+
+// -------------------- Asynchronous Slack automation --------------------
+const SLACK_NOTIFICATION_TYPES_ = Object.freeze(['NEW_HIGH_PRIORITY','REOPENED_HIGH_PRIORITY','SLA_WARNING','SLA_BREACHED','END_OF_DAY_SUMMARY','TEST']);
+const SLACK_QUEUE_STATUSES_ = Object.freeze(['PENDING','PROCESSING','SENT','FAILED']);
+const SLACK_OPEN_STATUSES_ = Object.freeze(['Raised','Reopened','Investigating']);
+
+function slackEnabled_() { return truthy_(getSettings_().SLACK_NOTIFICATIONS_ENABLED); }
+function slackPriorityConfigured_(priority, key) {
+  return String(getSettings_()[key] || '').split(',').map(v => v.trim().toUpperCase()).filter(Boolean).indexOf(String(priority || '').toUpperCase()) >= 0;
+}
+function getSlackWebhookUrl_() {
+  const value = String(PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL') || '').trim();
+  if (!value || value.indexOf('https://hooks.slack.com/') !== 0) throw new Error('Slack is not configured. An administrator must set a valid SLACK_WEBHOOK_URL Script Property.');
+  return value;
+}
+function slackAppUrl_() { return String(PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || ScriptApp.getService().getUrl() || ''); }
+function slackEscape_(value, limit) {
+  let text = String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/[\u0000-\u001f\u007f]/g,' ');
+  if (limit && text.length > limit) text = text.slice(0, Math.max(0, limit - 1)) + '…';
+  return text;
+}
+function slackMention_(priority) { return slackPriorityConfigured_(priority, 'SLACK_MENTION_PRIORITIES') ? '<!here> ' : ''; }
+function slackTicket_(ticket) {
+  return { id: ticket.ticketId || ticket.Ticket_ID, client: ticket.clientName || ticket.Client_Name, type: ticket.clientType || ticket.Client_Type,
+    size: ticket.clientSize || ticket.Client_Size, category: ticket.categoryName || ticket.Category_Name, priority: ticket.priority || ticket.Priority,
+    subject: ticket.emailSubject || ticket.Email_Subject, slaHours: ticket.slaHours || ticket.SLA_Hours, due: ticket.slaDueAt || ticket.SLA_Due_At,
+    status: ticket.status || ticket.Status, raiser: ticket.raiserEmail || ticket.Raiser_Email, cycle: ticket.slaCycleNumber || ticket.Current_SLA_Cycle,
+    handler: ticket.currentHandler || ticket.Picked_Up_By };
+}
+function slackFields_(items) { return items.filter(item => item[1] !== '' && item[1] != null).map(item => ({type:'mrkdwn',text:'*'+item[0]+'*\n'+slackEscape_(item[1],300)})); }
+function slackPayload_(fallback, title, fields, context, mention) {
+  const blocks = [{type:'section',text:{type:'mrkdwn',text:(mention || '')+'*'+title+'*'}}];
+  if (fields && fields.length) blocks.push({type:'section',fields:slackFields_(fields)});
+  if (context) blocks.push({type:'context',elements:[{type:'mrkdwn',text:context}]});
+  const url = slackAppUrl_(); if (url) blocks.push({type:'section',text:{type:'mrkdwn',text:'<'+slackEscape_(url,1000)+'|Open Internal Ticketing>'}});
+  return {text:(mention || '')+fallback,blocks:blocks};
+}
+function buildNewHighPrioritySlackPayload_(ticket) { const t=slackTicket_(ticket); return slackPayload_('NEW HIGH-PRIORITY TICKET '+slackEscape_(t.id,100),'🚨 NEW HIGH-PRIORITY TICKET',[
+  ['Ticket',t.id],['Client',t.client],['Client type',t.type],['Client Size',t.size],['Category',t.category],['Priority',t.priority],['Subject',slackEscape_(t.subject,300)],['SLA hours',t.slaHours],['SLA due',formatDateTimeOptional_(t.due)],['Raiser',t.raiser]
+],null,slackMention_(t.priority)); }
+function buildReopenedHighPrioritySlackPayload_(ticket,reopenedBy,reason) { const t=slackTicket_(ticket); return slackPayload_('REOPENED HIGH-PRIORITY TICKET '+slackEscape_(t.id,100),'🔄 REOPENED HIGH-PRIORITY TICKET',[
+  ['Ticket',t.id],['Client',t.client],['Category',t.category],['Priority',t.priority],['Reopened by',reopenedBy],['Reason',slackEscape_(reason,500)],['SLA cycle',t.cycle],['New SLA due',formatDateTimeOptional_(t.due)]
+],null,slackMention_(t.priority)); }
+function workingDurationText_(minutes) { minutes=Math.max(0,Math.round(minutes)); return (Math.floor(minutes/60)?Math.floor(minutes/60)+' hour'+(minutes>=120?'s':'')+' ':'')+(minutes%60?minutes%60+' minutes':''); }
+function buildSlaWarningSlackPayload_(ticket,minutes) { const t=slackTicket_(ticket); return slackPayload_('SLA BREACH WARNING '+slackEscape_(t.id,100),'⏳ SLA BREACH WARNING',[
+  ['Ticket',t.id],['Client',t.client],['Client Size',t.size],['Category',t.category],['Priority',t.priority],['Status',t.status],['Current handler',t.handler],['SLA cycle',t.cycle],['Due time',formatDateTimeOptional_(t.due)]
+],'Due within '+workingDurationText_(minutes)+' of working SLA time.',slackMention_(t.priority)); }
+function buildSlaBreachedSlackPayload_(ticket) { const t=slackTicket_(ticket); return slackPayload_('SLA BREACHED '+slackEscape_(t.id,100),'🔴 SLA BREACHED',[
+  ['Ticket',t.id],['Client',t.client],['Category',t.category],['Priority',t.priority],['Status',t.status],['SLA cycle',t.cycle],['Due time',formatDateTimeOptional_(t.due)]
+],null,slackMention_(t.priority)); }
+function summaryLines_(label, values) { const keys=Object.keys(values||{}).sort(); return '*'+label+'*\n'+(keys.length?keys.map(k=>'• '+slackEscape_(k,80)+': '+values[k]).join('\n'):'• None'); }
+function buildEndOfDaySlackPayload_(s) {
+  const adherence=s.resolvedToday ? (Math.round(s.slaMetToday/s.resolvedToday*1000)/10)+'%' : 'N/A';
+  const overdue=(s.oldestOverdue||[]).slice(0,5).map(t=>'• '+slackEscape_(t.Ticket_ID,100)+' — '+slackEscape_(t.Client_Name,120)+' — due '+formatDateTimeOptional_(t.SLA_Due_At)).join('\n')||'• None';
+  return {text:'Internal Ticketing end-of-day summary '+s.date,blocks:[
+    {type:'section',text:{type:'mrkdwn',text:'*📊 Internal Ticketing — End-of-Day Summary*\n'+slackEscape_(s.displayDate,100)}},
+    {type:'section',fields:slackFields_([['Raised today',s.raisedToday],['Resolved today',s.resolvedToday],['Currently open',s.open],['Overdue',s.overdue],['Due within next '+s.warningMinutes+' working minutes',s.dueSoon],['SLA adherence today',adherence]])},
+    {type:'section',text:{type:'mrkdwn',text:summaryLines_('Open by priority',s.byPriority)+'\n\n'+summaryLines_('Open by status',s.byStatus)+'\n\n'+summaryLines_('Open by Client Size',s.byClientSize)}},
+    {type:'section',text:{type:'mrkdwn',text:'*Oldest overdue*\n'+overdue}},
+    {type:'section',text:{type:'mrkdwn',text:slackAppUrl_()?'<'+slackEscape_(slackAppUrl_(),1000)+'|Open SLA Dashboard>':'Open SLA Dashboard'}}
+  ]};
+}
+function buildSlackTestPayload_() { const release=String(PropertiesService.getScriptProperties().getProperty('APP_RELEASE') || 'Production'); return slackPayload_('Slack integration test successful','✅ Slack integration test successful',[],slackEscape_(release,100)+' • '+formatDateTime_(new Date()),''); }
+
+function queueHeaders_(sheet) { return sheet.getRange(1,1,1,sheet.getLastColumn()).getDisplayValues()[0].map(v=>String(v).trim()); }
+function queueObjects_(sheet) { const headers=queueHeaders_(sheet),values=sheet.getLastRow()>1?sheet.getRange(2,1,sheet.getLastRow()-1,headers.length).getValues():[]; return values.map((row,i)=>({rowNumber:i+2,object:headers.reduce((o,h,j)=>{o[h]=row[j];return o;},{}),values:row})); }
+function queueHasDedupe_(sheet,key) { const headers=queueHeaders_(sheet),index=headers.indexOf('Dedupe_Key'); if(index<0)throw new Error('SlackNotifications is missing Dedupe_Key. Run repairApplicationSchema().'); return sheet.getLastRow()>1&&sheet.getRange(2,index+1,sheet.getLastRow()-1,1).getDisplayValues().some(row=>String(row[0])===key); }
+function enqueueSlackNotification_(notification) {
+  if (!slackEnabled_()) return {enqueued:false,duplicate:false};
+  notification=notification||{}; const key=String(notification.dedupeKey||'').trim(); if(!key)throw new Error('Slack notification Dedupe_Key is required.');
+  if(SLACK_NOTIFICATION_TYPES_.indexOf(String(notification.notificationType))<0)throw new Error('Invalid Slack Notification_Type.');
+  const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS); if(queueHasDedupe_(sheet,key))return{enqueued:false,duplicate:true};
+  const lock=LockService.getScriptLock(); lock.waitLock(5000); try { if(queueHasDedupe_(sheet,key))return{enqueued:false,duplicate:true};
+    const now=new Date(),headers=queueHeaders_(sheet),data={Notification_ID:Utilities.getUuid(),Dedupe_Key:key,Notification_Type:notification.notificationType,Ticket_ID:notification.ticketId||'',SLA_Cycle_Number:notification.slaCycleNumber||'',Priority:notification.priority||'',Payload_JSON:JSON.stringify(notification.payload||{}),Status:'PENDING',Attempts:0,Next_Attempt_At:now,Created_At:now,Processing_Started_At:'',Sent_At:'',Last_HTTP_Code:'',Last_Error:'',Updated_At:now};
+    sheet.getRange(sheet.getLastRow()+1,1,1,headers.length).setValues([headers.map(h=>data[h]===undefined?'':data[h])]); return{enqueued:true,duplicate:false};
+  } finally { lock.releaseLock(); }
+}
+
+/** Working time between instants, chunked by business-day windows. */
+function calculateWorkingMinutesBetween_(fromDate,toDate) {
+  const from=toDate_(fromDate),to=toDate_(toDate); if(!from||!to||isNaN(from.getTime())||isNaN(to.getTime())||to<=from)return 0;
+  let cursor=from,total=0; while(cursor<to){ if(!isWorkingDay_(cursor)||cursor>=getWorkingDayEnd_(cursor)){cursor=moveToNextWorkingStart_(cursor);continue;}
+    if(cursor<getWorkingDayStart_(cursor))cursor=getWorkingDayStart_(cursor); if(cursor>=to)break;
+    const end=new Date(Math.min(to.getTime(),getWorkingDayEnd_(cursor).getTime())); if(end>cursor)total+=end-cursor;
+    if(end>=to)break; cursor=moveToNextWorkingStart_(cursor);
+  } return Math.round(total/60000);
+}
+function monitorSlackAlerts() {
+  const started=Date.now(),metrics={rowsScanned:0,notificationsEnqueued:0,notificationsSent:0,notificationsFailed:0};
+  try { if(!slackEnabled_())return metrics; const settings=getSettings_(),now=new Date(),rows=getSheetObjects_(APP.SHEETS.TICKET_INDEX); metrics.rowsScanned=rows.length;
+    rows.forEach(ticket=>{ try { const id=String(ticket.Ticket_ID||''),status=String(ticket.Status||''),due=toDate_(ticket.SLA_Due_At),cycle=number_(ticket.Current_SLA_Cycle,1); if(!id||SLACK_OPEN_STATUSES_.indexOf(status)<0||!due||isNaN(due.getTime()))return;
+      let result;if(due<=now&&truthy_(settings.SLACK_BREACH_ALERT_ENABLED))result=enqueueSlackNotification_({notificationType:'SLA_BREACHED',dedupeKey:'SLA_BREACHED:'+id+':'+cycle,ticketId:id,slaCycleNumber:cycle,priority:ticket.Priority,payload:buildSlaBreachedSlackPayload_(ticket)});
+      else if(due>now&&truthy_(settings.SLACK_BREACH_WARNING_ENABLED)){const remaining=calculateWorkingMinutesBetween_(now,due),limit=number_(settings.SLACK_BREACH_WARNING_MINUTES,120);if(remaining>0&&remaining<=limit)result=enqueueSlackNotification_({notificationType:'SLA_WARNING',dedupeKey:'SLA_WARNING:'+id+':'+cycle,ticketId:id,slaCycleNumber:cycle,priority:ticket.Priority,payload:buildSlaWarningSlackPayload_(ticket,remaining)});}
+      if(result&&result.enqueued)metrics.notificationsEnqueued++;
+    } catch(rowError){metrics.notificationsFailed++;console.error('monitorSlackAlerts row failed: '+slackEscape_(rowError.message,500));} });
+    if(enqueueEndOfDaySlackSummary_().enqueued)metrics.notificationsEnqueued++;
+  } catch(error){console.error('monitorSlackAlerts failed: '+slackEscape_(error.message,500));} finally {console.log(JSON.stringify(Object.assign({functionName:'monitorSlackAlerts',durationMs:Date.now()-started,lockWaitMs:0},metrics)));} return metrics;
+}
+function localDateKey_(date){return Utilities.formatDate(date,APP.TZ,'yyyy-MM-dd');}
+function enqueueEndOfDaySlackSummary_() {
+  if(!slackEnabled_())return{enqueued:false,duplicate:false}; const settings=getSettings_();if(!truthy_(settings.SLACK_EOD_SUMMARY_ENABLED))return{enqueued:false,duplicate:false};
+  const now=new Date(),day=Number(Utilities.formatDate(now,APP.TZ,'u')),hour=Number(Utilities.formatDate(now,APP.TZ,'H')),minute=Number(Utilities.formatDate(now,APP.TZ,'m')),target=number_(settings.SLACK_EOD_HOUR,19)*60+number_(settings.SLACK_EOD_MINUTE,45); if(day>5||hour*60+minute<target)return{enqueued:false,duplicate:false};
+  const date=localDateKey_(now),rows=getSheetObjects_(APP.SHEETS.TICKET_INDEX),warning=number_(settings.SLACK_BREACH_WARNING_MINUTES,120),summary={date:date,displayDate:Utilities.formatDate(now,APP.TZ,'d MMMM yyyy'),raisedToday:0,resolvedToday:0,slaMetToday:0,open:0,overdue:0,dueSoon:0,warningMinutes:warning,byPriority:{},byStatus:{},byClientSize:{},oldestOverdue:[]};
+  rows.forEach(t=>{if(t.Created_At&&localDateKey_(toDate_(t.Created_At))===date)summary.raisedToday++;if(t.Resolved_At&&localDateKey_(toDate_(t.Resolved_At))===date){summary.resolvedToday++;if(String(t.SLA_Result).toUpperCase()==='MET')summary.slaMetToday++;}if(SLACK_OPEN_STATUSES_.indexOf(String(t.Status))<0)return;summary.open++;[['byPriority',t.Priority||'Not specified'],['byStatus',t.Status||'Not specified'],['byClientSize',t.Client_Size||'Not specified']].forEach(x=>summary[x[0]][x[1]]=(summary[x[0]][x[1]]||0)+1);const due=toDate_(t.SLA_Due_At);if(!due||isNaN(due.getTime()))return;if(due<=now){summary.overdue++;summary.oldestOverdue.push(t);}else{const remaining=calculateWorkingMinutesBetween_(now,due);if(remaining>0&&remaining<=warning)summary.dueSoon++;}});summary.oldestOverdue.sort((a,b)=>toDate_(a.SLA_Due_At)-toDate_(b.SLA_Due_At));
+  const result=enqueueSlackNotification_({notificationType:'END_OF_DAY_SUMMARY',dedupeKey:'EOD:'+date,ticketId:'',slaCycleNumber:'',priority:'',payload:buildEndOfDaySlackPayload_(summary)}); if(result.enqueued)cleanupSlackNotificationHistory_();return result;
+}
+function sendSlackWebhookPayload_(payload) {
+  const response=UrlFetchApp.fetch(getSlackWebhookUrl_(),{method:'post',contentType:'application/json',payload:JSON.stringify(payload),muteHttpExceptions:true});
+  return {code:response.getResponseCode(),body:String(response.getContentText()||''),headers:response.getAllHeaders?response.getAllHeaders():{}};
+}
+function retryDelayMinutes_(attempt){return [1,5,15][Math.min(Math.max(attempt-1,0),2)];}
+function updateClaimedSlackRow_(notificationId,changes) { const lock=LockService.getScriptLock();lock.waitLock(5000);try{const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),id=headers.indexOf('Notification_ID'),rows=sheet.getLastRow()>1?sheet.getRange(2,id+1,sheet.getLastRow()-1,1).getDisplayValues():[];let row=0;rows.some((v,i)=>{if(String(v[0])===String(notificationId)){row=i+2;return true;}return false;});if(!row)return false;Object.keys(changes).forEach(key=>{const column=headers.indexOf(key);if(column>=0)sheet.getRange(row,column+1).setValue(changes[key]);});return true;}finally{lock.releaseLock();}}
+function dispatchSlackNotifications() {
+  const started=Date.now(),metrics={rowsScanned:0,notificationsEnqueued:0,notificationsSent:0,notificationsFailed:0,lockWaitMs:0};if(!slackEnabled_())return metrics;
+  let claims=[];const settings=getSettings_(),now=new Date(),batch=Math.max(1,number_(settings.SLACK_DISPATCH_BATCH_SIZE,10)),timeout=number_(settings.SLACK_PROCESSING_TIMEOUT_MINUTES,10)*60000,lock=LockService.getScriptLock(),wait=Date.now();
+  try{lock.waitLock(5000);metrics.lockWaitMs=Date.now()-wait;const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),rows=queueObjects_(sheet);metrics.rowsScanned=rows.length;claims=rows.filter(row=>{const o=row.object,next=toDate_(o.Next_Attempt_At),processing=toDate_(o.Processing_Started_At);return(String(o.Status)==='PENDING'&&(!next||isNaN(next.getTime())||next<=now))||(String(o.Status)==='PROCESSING'&&processing&&!isNaN(processing.getTime())&&processing.getTime()<=now.getTime()-timeout);}).slice(0,batch);const status=headers.indexOf('Status'),processing=headers.indexOf('Processing_Started_At'),updated=headers.indexOf('Updated_At');claims.forEach(row=>{row.values[status]='PROCESSING';row.values[processing]=now;row.values[updated]=now;sheet.getRange(row.rowNumber,1,1,headers.length).setValues([row.values]);});}catch(error){console.error('dispatchSlackNotifications claim failed: '+slackEscape_(error.message,500));return metrics;}finally{lock.releaseLock();}
+  claims.forEach(row=>{const o=row.object,id=o.Notification_ID,attempt=number_(o.Attempts,0)+1,max=Math.max(1,number_(settings.SLACK_MAX_RETRIES,3));try{let payload;try{payload=JSON.parse(String(o.Payload_JSON||''));if(!payload||typeof payload!=='object')throw new Error('not an object');}catch(parseError){updateClaimedSlackRow_(id,{Status:'FAILED',Attempts:attempt,Last_Error:'Invalid Payload_JSON',Updated_At:new Date()});metrics.notificationsFailed++;return;}const result=sendSlackWebhookPayload_(payload),code=result.code;if(code>=200&&code<300){updateClaimedSlackRow_(id,{Status:'SENT',Attempts:attempt,Sent_At:new Date(),Last_HTTP_Code:code,Last_Error:'',Updated_At:new Date()});metrics.notificationsSent++;return;}const temporary=code===429||(code>=500&&code<=599),retry=temporary&&attempt<max;let delay=retryDelayMinutes_(attempt);if(code===429){const h=result.headers||{},raw=h['Retry-After']||h['retry-after'];delay=Math.max(delay,Math.ceil(number_(Array.isArray(raw)?raw[0]:raw,0)/60));}updateClaimedSlackRow_(id,{Status:retry?'PENDING':'FAILED',Attempts:attempt,Next_Attempt_At:retry?new Date(Date.now()+delay*60000):'',Last_HTTP_Code:code,Last_Error:slackEscape_('Slack HTTP '+code,500),Updated_At:new Date()});if(!retry)metrics.notificationsFailed++;}catch(error){const retry=attempt<max;updateClaimedSlackRow_(id,{Status:retry?'PENDING':'FAILED',Attempts:attempt,Next_Attempt_At:retry?new Date(Date.now()+retryDelayMinutes_(attempt)*60000):'',Last_HTTP_Code:'',Last_Error:slackEscape_('Slack network request failed: '+String(error&&error.message||error).replace(/https:\/\/\S+/g,'[redacted]'),500),Updated_At:new Date()});if(!retry)metrics.notificationsFailed++;}});
+  console.log(JSON.stringify(Object.assign({functionName:'dispatchSlackNotifications',durationMs:Date.now()-started},metrics)));return metrics;
+}
+function cleanupSlackNotificationHistory_(){const props=PropertiesService.getScriptProperties(),today=localDateKey_(new Date());if(props.getProperty('SLACK_CLEANUP_DATE')===today)return{cleaned:0};const days=Math.max(1,number_(getSettings_().SLACK_NOTIFICATION_RETENTION_DAYS,30)),cutoff=Date.now()-days*86400000,lock=LockService.getScriptLock();lock.waitLock(5000);try{const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),status=headers.indexOf('Status'),updated=headers.indexOf('Updated_At');if(sheet.getLastRow()<2){props.setProperty('SLACK_CLEANUP_DATE',today);return{cleaned:0};}const rows=sheet.getRange(2,1,sheet.getLastRow()-1,headers.length).getValues(),keep=rows.filter(row=>['SENT','FAILED'].indexOf(String(row[status]))<0||!toDate_(row[updated])||toDate_(row[updated]).getTime()>=cutoff),cleaned=rows.length-keep.length;if(cleaned){sheet.getRange(2,1,rows.length,headers.length).clearContent();if(keep.length)sheet.getRange(2,1,keep.length,headers.length).setValues(keep);}props.setProperty('SLACK_CLEANUP_DATE',today);return{cleaned:cleaned};}finally{lock.releaseLock();}}
+function setupSlackAutomationTriggers(){const handlers={dispatchSlackNotifications:1,monitorSlackAlerts:15},existing=ScriptApp.getProjectTriggers();Object.keys(handlers).forEach(name=>{const matching=existing.filter(t=>t.getHandlerFunction()===name);matching.slice(1).forEach(t=>ScriptApp.deleteTrigger(t));if(!matching.length)ScriptApp.newTrigger(name).timeBased().everyMinutes(handlers[name]).create();});return{handlers:[{name:'dispatchSlackNotifications',frequency:'every 1 minute'},{name:'monitorSlackAlerts',frequency:'every 15 minutes'}]};}
+function removeSlackAutomationTriggers(){let removed={dispatchSlackNotifications:0,monitorSlackAlerts:0};ScriptApp.getProjectTriggers().forEach(t=>{const name=t.getHandlerFunction();if(Object.prototype.hasOwnProperty.call(removed,name)){ScriptApp.deleteTrigger(t);removed[name]++;}});return{removed:removed};}
+function validateSlackAutomation(){const settings=getSettings_(),sheet=getSpreadsheet_().getSheetByName(APP.SHEETS.SLACK_NOTIFICATIONS),triggers=ScriptApp.getProjectTriggers(),dc=triggers.filter(t=>t.getHandlerFunction()==='dispatchSlackNotifications').length,mc=triggers.filter(t=>t.getHandlerFunction()==='monitorSlackAlerts').length,rows=sheet?queueObjects_(sheet):[],sent=rows.filter(r=>String(r.object.Status)==='SENT').map(r=>toDate_(r.object.Sent_At)).filter(d=>d&&!isNaN(d.getTime())).sort((a,b)=>b-a),warnings=[];let webhook=false;try{getSlackWebhookUrl_();webhook=true;}catch(e){warnings.push('SLACK_WEBHOOK_URL is not configured.');}if(dc!==1)warnings.push('Dispatcher trigger count must be one.');if(mc!==1)warnings.push('Monitor trigger count must be one.');const result={notificationsEnabled:truthy_(settings.SLACK_NOTIFICATIONS_ENABLED),webhookConfigured:webhook,queueSheetReady:Boolean(sheet),dispatcherTriggerPresent:dc>0,monitorTriggerPresent:mc>0,dispatcherTriggerCount:dc,monitorTriggerCount:mc,pendingCount:rows.filter(r=>String(r.object.Status)==='PENDING').length,failedCount:rows.filter(r=>String(r.object.Status)==='FAILED').length,lastSentAt:sent.length?sent[0].toISOString():'',schemaVersion:CURRENT_SCHEMA_VERSION,ready:false,warnings:warnings};result.ready=result.notificationsEnabled&&result.webhookConfigured&&result.queueSheetReady&&dc===1&&mc===1;return result;}
+function testSlackConnection(){getSlackWebhookUrl_();const id=Utilities.getUuid(),key='TEST:'+id,result=enqueueSlackNotification_({notificationType:'TEST',dedupeKey:key,ticketId:'',slaCycleNumber:'',priority:'',payload:buildSlackTestPayload_()});if(result.enqueued)dispatchSlackNotifications();const row=queueObjects_(getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS)).find(r=>String(r.object.Dedupe_Key)===key),status=row?String(row.object.Status):'FAILED';return{success:status==='SENT',notificationId:row?String(row.object.Notification_ID):'',status:status,httpCode:row?number_(row.object.Last_HTTP_Code,0):0};}
