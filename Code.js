@@ -3,7 +3,7 @@
  * Do not put passwords or the Slack webhook directly in this file.
  */
 
-const APP_RELEASE = 'client-size-performance-v1';
+const APP_RELEASE = 'ticketing-stability-v1';
 const APP_COMMIT = '__APP_COMMIT__';
 let SPREADSHEET_INSTANCE_ = null;
 let SLA_SCHEMA_RECOVERY_FAILED_ = false;
@@ -73,35 +73,7 @@ function getBootstrap() {
   return buildBootstrap_(user);
 }
 
-function buildBootstrap_(user) {
-  const settings = getSettings_();
-  return {
-    user,
-    categories: getActiveCategories_(),
-    rootCauses: String(settings.ROOT_CAUSES || '').split('|').filter(Boolean),
-    duplicateWindowDays: number_(settings.DUPLICATE_WINDOW_DAYS, 5),
-    resolvedVisibilityDays: number_(settings.RESOLVED_VISIBILITY_DAYS, 10),
-    dashboardWindowDays: number_(settings.DASHBOARD_WINDOW_DAYS, 14)
-  };
-}
 
-function getInitialAppState() {
-  const startedAt = Date.now();
-  const schema = ensureRuntimeSchema_();
-  const email = getVerifiedCompanyEmail_();
-  const users = getSheetObjects_(APP.SHEETS.USERS);
-  const row = users.find(u => lower_(u.Email) === email);
-  let result;
-  if (!row) result = { state: 'REGISTER', email, release: APP_RELEASE };
-  else if (!truthy_(row.Active)) result = { state: 'BLOCKED', email, message: 'Your access has been disabled. Please contact the application administrator.', release: APP_RELEASE };
-  else {
-    const user = userFromRow_(row, email);
-    result = { state: 'ACTIVE', email, name: user.name, role: user.role, bootstrap: buildBootstrap_(user), release: APP_RELEASE };
-  }
-  if (!schema.ready) result.schemaRecoverable = true;
-  logPerformance_('getInitialAppState', startedAt, { rows: users.length });
-  return result;
-}
 
 function checkDuplicate(payload) {
   const startedAt = Date.now();
@@ -135,92 +107,6 @@ function checkDuplicate(payload) {
   return { hasDuplicate: matches.length > 0, matches };
 }
 
-function submitTicket(form) {
-  const startedAt = Date.now();
-  const user = requireUser_();
-  if (!form || typeof form !== 'object') throw new Error('The form data was not received. Please refresh and try again.');
-
-  const category = getCategoryById_(form.categoryId);
-  if (!category) throw new Error('The selected category is no longer active. Refresh the page and choose again.');
-
-  const client = resolveClient_(form, category.Client_Type);
-  validateTicketForm_(form, category, client);
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-
-  let ticketId;
-  let attachment = { id: '', name: '', url: '' };
-  try {
-    requireTicketSlaCyclesSchemaForWrite_(true);
-    ticketId = nextTicketId_();
-    attachment = saveAttachment_(form.attachment, ticketId, user.email);
-
-    const createdAt = new Date();
-    const slaHours = number_(category.SLA_Hours, 24);
-    const slaDueAt = calculateWorkingSlaDueAt_(createdAt, slaHours);
-    const subject = cleanText_(form.emailSubject, 300);
-    const dynamicFields = extractDynamicFields_(form, category);
-    const duplicateIds = cleanText_(form.duplicateIds || '', 500);
-    const duplicateOverride = String(form.duplicateOverride || '').toLowerCase() === 'true';
-
-    const ticket = {
-      Ticket_ID: ticketId,
-      Created_At: createdAt,
-      Raiser_Email: user.email,
-      Raiser_Name: user.name,
-      Client_Mode: client.mode,
-      Client_ID: client.id,
-      Client_Name: client.name,
-      Client_Type: client.type,
-      Category_ID: category.Category_ID,
-      Category_Name: category.Category_Name,
-      Email_Subject: subject,
-      Normalized_Subject: normalizeSubject_(subject),
-      Issue_Description: cleanText_(form.issueDescription, 5000),
-      Priority: String(category.Priority).toUpperCase(),
-      SLA_Hours: slaHours,
-      SLA_Due_At: slaDueAt,
-      Status: APP.STATUS.RAISED,
-      Picked_Up_By: '',
-      Picked_Up_At: '',
-      Investigating_At: '',
-      Resolution_Note: '',
-      Root_Cause: '',
-      Resolved_By: '',
-      Resolved_At: '',
-      SLA_Result: 'ON TRACK',
-      Duplicate_Of: duplicateIds,
-      Duplicate_Override: duplicateOverride,
-      Dynamic_Fields_JSON: JSON.stringify(dynamicFields),
-      Attachment_File_ID: attachment.id,
-      Attachment_File_Name: attachment.name,
-      Attachment_URL: attachment.url,
-      Updated_At: createdAt,
-      Updated_By: user.email
-    };
-
-    appendObject_(APP.SHEETS.TICKETS, ticket);
-    appendSlaCycle_({
-      Ticket_ID: ticketId, Cycle_Number: 1, Cycle_Type: 'INITIAL', Started_At: createdAt, Due_At: slaDueAt,
-      SLA_Result: 'OPEN', Started_By: user.email, Created_At: createdAt, Updated_At: createdAt
-    });
-    appendEvent_(ticketId, 'TICKET_RAISED', '', APP.STATUS.RAISED, user.email, duplicateOverride ? 'Raised despite duplicate warning.' : '');
-    removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
-  } finally {
-    lock.releaseLock();
-  }
-
-  const detail = getTicketDetail(ticketId);
-  try {
-    sendSlackAlert_(detail);
-  } catch (err) {
-    if (String(err && err.message || '') === DEPLOYMENT_AUTHORIZATION_MESSAGE) throw err;
-    console.error('Slack alert failed: ' + err.message);
-  }
-  logPerformance_('submitTicket', startedAt, { rows: 1 });
-  return detail;
-}
 
 /** Returns a server-calculated SLA estimate for the Raise Ticket form. */
 function getSlaDuePreview(categoryId, clientSizeCode) {
@@ -232,146 +118,9 @@ function getSlaDuePreview(categoryId, clientSizeCode) {
   return { dueAt: formatDateTime_(dueAt), dueAtIso: dueAt.toISOString(), priority: resolution.priority, slaHours: resolution.slaHours };
 }
 
-function getMyTickets() {
-  const startedAt = Date.now();
-  const user = requireUser_();
-  const settings = getSettings_();
-  const cutoff = new Date(Date.now() - number_(settings.RESOLVED_VISIBILITY_DAYS, 10) * 24 * 60 * 60 * 1000);
 
-  const tickets = getSheetObjects_(APP.SHEETS.TICKETS);
-  const result = tickets
-    .filter(t => lower_(t.Raiser_Email) === user.email)
-    .filter(t => String(t.Status) !== APP.STATUS.RESOLVED || toDate_(t.Resolved_At) >= cutoff)
-    .sort((a, b) => toDate_(b.Created_At) - toDate_(a.Created_At))
-    .map(serializeTicket_);
-  logPerformance_('getMyTickets', startedAt, { rows: tickets.length });
-  return result;
-}
 
-function getQueueTickets(filters) {
-  const startedAt = Date.now();
-  requireRole_([APP.ROLES.POC, APP.ROLES.ADMIN]);
-  filters = filters || {};
-  const pageSize = Math.min(100, Math.max(1, Math.floor(number_(filters.pageSize, 50))));
-  const requestedPage = Math.max(1, Math.floor(number_(filters.page, 1)));
-  const search = lower_(filters.search);
-  const status = filters.status === undefined ? 'OPEN' : String(filters.status);
-  const priority = String(filters.priority || '');
-  const category = String(filters.category || '');
-  const sla = String(filters.sla || '');
-  const tickets = getSheetObjects_(APP.SHEETS.TICKETS);
-  const filtered = tickets.filter(t => {
-    const serialized = serializeQueueTicket_(t);
-    return (!search || [serialized.ticketId, serialized.clientName, serialized.emailSubject, serialized.raiserEmail].join(' ').toLowerCase().includes(search)) &&
-      (status === 'OPEN' ? serialized.status !== APP.STATUS.RESOLVED : (!status || serialized.status === status)) &&
-      (!priority || serialized.priority === priority) && (!category || serialized.categoryName === category) && (!sla || serialized.slaStatus === sla);
-  }).sort(queueSort_);
-  const totalRows = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-  const page = Math.min(requestedPage, totalPages);
-  const rows = filtered.slice((page - 1) * pageSize, page * pageSize).map(serializeQueueTicket_);
-  const result = { rows, page, pageSize, totalRows, totalPages, categories: getActiveCategories_().map(c => c.name).filter((v, i, a) => a.indexOf(v) === i).sort() };
-  logPerformance_('getQueueTickets', startedAt, { rows: tickets.length });
-  return result;
-}
 
-function getTicketDetail(ticketId) {
-  const startedAt = Date.now();
-  const user = requireUser_();
-  const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', ticketId);
-  if (!found) throw new Error('Ticket not found.');
-  if (user.role === APP.ROLES.SALES && lower_(found.object.Raiser_Email) !== user.email) {
-    throw new Error('You are not allowed to view this ticket.');
-  }
-  const result = serializeTicket_(found.object);
-  result.dynamicFields = safeJsonParse_(found.object.Dynamic_Fields_JSON, {});
-  result.slaCycles = getTicketSlaCycles_(ticketId).map(serializeSlaCycle_);
-  result.slaHistoryPreparing = SLA_SCHEMA_RECOVERY_FAILED_;
-  result.slaCycleNumber = result.slaCycles.length ? Math.max.apply(null, result.slaCycles.map(c => c.cycleNumber)) : 0;
-  result.reopenCount = result.slaCycles.filter(c => c.cycleType === 'REOPEN').length;
-  result.canReopen = String(found.object.Status) === APP.STATUS.RESOLVED &&
-    (user.role === APP.ROLES.POC || user.role === APP.ROLES.ADMIN || lower_(found.object.Raiser_Email) === user.email);
-  result.events = getSheetObjects_(APP.SHEETS.EVENTS)
-    .filter(e => String(e.Ticket_ID) === String(ticketId))
-    .sort((a, b) => toDate_(a.Created_At) - toDate_(b.Created_At))
-    .map(e => ({
-      eventType: String(e.Event_Type),
-      oldValue: String(e.Old_Value || ''),
-      newValue: String(e.New_Value || ''),
-      performedBy: String(e.Performed_By || ''),
-      createdAt: formatDateTime_(e.Created_At),
-      note: String(e.Note || '')
-    }));
-  logPerformance_('getTicketDetail', startedAt, { rows: 1 });
-  return result;
-}
-
-function updateTicketStatus(payload) {
-  const startedAt = Date.now();
-  const user = requireRole_([APP.ROLES.POC, APP.ROLES.ADMIN]);
-  if (!payload || !payload.ticketId || !payload.newStatus) throw new Error('Ticket and new status are required.');
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    requireTicketSlaCyclesSchemaForWrite_(true);
-    const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', payload.ticketId);
-    if (!found) throw new Error('Ticket not found.');
-    const ticket = found.object;
-    const oldStatus = String(ticket.Status);
-    const newStatus = String(payload.newStatus);
-
-    const allowedTransitions = {};
-    allowedTransitions[APP.STATUS.RAISED] = APP.STATUS.INVESTIGATING;
-    allowedTransitions[APP.STATUS.REOPENED] = APP.STATUS.INVESTIGATING;
-    allowedTransitions[APP.STATUS.INVESTIGATING] = APP.STATUS.RESOLVED;
-    if (allowedTransitions[oldStatus] !== newStatus) throw new Error(`Transition from ${oldStatus} to ${newStatus} is not allowed.`);
-    if (oldStatus === APP.STATUS.RESOLVED) throw new Error('Resolved tickets can only be reopened.');
-    if ([APP.STATUS.RAISED, APP.STATUS.REOPENED].includes(oldStatus) && newStatus !== APP.STATUS.INVESTIGATING) {
-      throw new Error(`A ${oldStatus} ticket must first move to Investigating.`);
-    }
-    if (oldStatus === APP.STATUS.INVESTIGATING && newStatus !== APP.STATUS.RESOLVED) {
-      throw new Error('An Investigating ticket can only move to Resolved.');
-    }
-
-    const now = new Date();
-    const changes = {
-      Status: newStatus,
-      Updated_At: now,
-      Updated_By: user.email
-    };
-
-    if (newStatus === APP.STATUS.INVESTIGATING) {
-      changes.Picked_Up_By = user.email;
-      changes.Picked_Up_At = now;
-      changes.Investigating_At = now;
-    }
-
-    if (newStatus === APP.STATUS.RESOLVED) {
-      const note = cleanText_(payload.resolutionNote, 5000);
-      const rootCause = cleanText_(payload.rootCause, 200);
-      if (!note) throw new Error('Resolution note is mandatory.');
-      if (!rootCause) throw new Error('Root cause is mandatory.');
-      changes.Resolution_Note = note;
-      changes.Root_Cause = rootCause;
-      changes.Resolved_By = user.email;
-      changes.Resolved_At = now;
-      changes.SLA_Result = now <= toDate_(ticket.SLA_Due_At) ? 'MET' : 'BREACHED';
-      ensureOpenInitialCycle_(ticket);
-      closeOpenSlaCycle_(payload.ticketId, now, user.email, changes.SLA_Result);
-    }
-
-    updateObjectRow_(APP.SHEETS.TICKETS, found.rowNumber, changes);
-    appendEvent_(payload.ticketId, 'STATUS_CHANGED', oldStatus, newStatus, user.email,
-      newStatus === APP.STATUS.RESOLVED ? `${changes.Root_Cause}: ${changes.Resolution_Note}` : '');
-    removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
-  } finally {
-    lock.releaseLock();
-  }
-  const result = getTicketDetail(payload.ticketId);
-  logPerformance_('updateTicketStatus', startedAt, { rows: 1 });
-  return result;
-}
 
 function getReopenPreview(ticketId) {
   const user = requireUser_();
@@ -383,49 +132,6 @@ function getReopenPreview(ticketId) {
 }
 
 /** Reopens one resolved ticket and starts an independent SLA cycle. */
-function reopenTicket(payload) {
-  const startedAt = Date.now();
-  const user = requireUser_();
-  if (!payload || !payload.ticketId) throw new Error('Ticket is required.');
-  const reason = cleanText_(payload.reopenReason, 5001);
-  if (!reason) throw new Error('Reason for reopening / latest client response is mandatory.');
-  if (reason.length > 5000) throw new Error('Reopening reason must be 5,000 characters or fewer.');
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  let reopened;
-  try {
-    requireTicketSlaCyclesSchemaForWrite_(true);
-    const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', payload.ticketId);
-    if (!found) throw new Error('Ticket not found.');
-    const ticket = found.object;
-    assertCanReopen_(user, ticket);
-    ensureLegacyInitialCycle_(ticket);
-    const cycles = getTicketSlaCycles_(payload.ticketId);
-    if (cycles.some(cycle => String(cycle.SLA_Result) === 'OPEN')) throw new Error('This ticket already has an open SLA cycle.');
-    const reopenedAt = new Date();
-    const dueAt = calculateWorkingSlaDueAt_(reopenedAt, number_(ticket.SLA_Hours, 0));
-    const cycleNumber = cycles.reduce((max, cycle) => Math.max(max, number_(cycle.Cycle_Number, 0)), 0) + 1;
-    updateObjectRow_(APP.SHEETS.TICKETS, found.rowNumber, {
-      Status: APP.STATUS.REOPENED, SLA_Due_At: dueAt, SLA_Result: '', Updated_At: reopenedAt, Updated_By: user.email,
-      Picked_Up_By: '', Picked_Up_At: '', Investigating_At: '', Resolution_Note: '', Root_Cause: '', Resolved_By: '', Resolved_At: ''
-    });
-    appendSlaCycle_({
-      Ticket_ID: payload.ticketId, Cycle_Number: cycleNumber, Cycle_Type: 'REOPEN', Started_At: reopenedAt,
-      Due_At: dueAt, SLA_Result: 'OPEN', Started_By: user.email, Reopen_Reason: reason,
-      Created_At: reopenedAt, Updated_At: reopenedAt
-    });
-    appendEvent_(payload.ticketId, 'TICKET_REOPENED', APP.STATUS.RESOLVED, APP.STATUS.REOPENED, user.email, reason, reopenedAt);
-    removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
-    reopened = { ticketId: payload.ticketId, reopenedAt };
-  } finally { lock.releaseLock(); }
-  const detail = getTicketDetail(reopened.ticketId);
-  try { sendSlackReopenedAlert_(detail, user.email, reason); } catch (err) {
-    if (String(err && err.message || '') === DEPLOYMENT_AUTHORIZATION_MESSAGE) throw err;
-    console.error('Slack reopen alert failed: ' + err.message);
-  }
-  logPerformance_('reopenTicket', startedAt, { rows: 1 });
-  return detail;
-}
 
 function assertCanReopen_(user, ticket) {
   if (String(ticket.Status) !== APP.STATUS.RESOLVED) throw new Error('Only a Resolved ticket can be reopened.');
@@ -434,42 +140,6 @@ function assertCanReopen_(user, ticket) {
   }
 }
 
-function getNumbers() {
-  const startedAt = Date.now();
-  requireRole_([APP.ROLES.POC, APP.ROLES.ADMIN]);
-  const cached = getCachedJson_(CACHE_KEYS_.NUMBERS);
-  if (cached !== null) {
-    logPerformance_('getNumbers', startedAt, { cache: 'hit' });
-    return cached;
-  }
-  const settings = getSettings_();
-  const days = number_(settings.DASHBOARD_WINDOW_DAYS, 14);
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const now = new Date();
-  const tickets = getSheetObjects_(APP.SHEETS.TICKETS);
-
-  const raisedInWindow = tickets.filter(t => toDate_(t.Created_At) >= cutoff);
-  const resolvedInWindow = tickets.filter(t => t.Resolved_At && toDate_(t.Resolved_At) >= cutoff);
-  const open = tickets.filter(t => String(t.Status) !== APP.STATUS.RESOLVED);
-  const overdue = open.filter(t => toDate_(t.SLA_Due_At) < now);
-  const met = resolvedInWindow.filter(t => toDate_(t.Resolved_At) <= toDate_(t.SLA_Due_At)).length;
-  const adherence = resolvedInWindow.length ? Math.round((met / resolvedInWindow.length) * 1000) / 10 : null;
-
-  const result = {
-    days,
-    raised: raisedInWindow.length,
-    resolved: resolvedInWindow.length,
-    open: open.length,
-    overdue: overdue.length,
-    adherence,
-    byStatus: countBy_(open, 'Status'),
-    byPriority: countBy_(open, 'Priority'),
-    byCategory: countBy_(open, 'Category_Name')
-  };
-  putCachedJson_(CACHE_KEYS_.NUMBERS, result, 60);
-  logPerformance_('getNumbers', startedAt, { rows: tickets.length, cache: 'miss' });
-  return result;
-}
 
 function setWebAppUrlFromEditor() {
   // After deployment, paste the /exec URL here, run once, then remove it from the code.
@@ -571,14 +241,6 @@ function userFromRow_(row, email) {
   return { email, name: String(row.Name || email.split('@')[0]), role };
 }
 
-function requireUser_() {
-  const email = getVerifiedCompanyEmail_();
-
-  const row = getSheetObjects_(APP.SHEETS.USERS).find(u => lower_(u.Email) === email && truthy_(u.Active));
-  if (!row) throw new Error('You do not have access yet. Ask the app administrator to add your email to the Users sheet.');
-
-  return userFromRow_(row, email);
-}
 
 function requireRole_(roles) {
   const user = requireUser_();
@@ -753,10 +415,6 @@ function getActiveCategories_() {
   return categories;
 }
 
-function getCategoryById_(id) {
-  return getSheetObjects_(APP.SHEETS.CATEGORIES)
-    .find(r => String(r.Category_ID) === String(id) && truthy_(r.Active));
-}
 
 /** Write paths must fail clearly rather than silently losing cycle history. */
 function requireTicketSlaCyclesSchemaForWrite_(lockAlreadyHeld) {
@@ -821,36 +479,11 @@ function updateObjectRow_(sheetName, rowNumber, changes) {
   range.setValues([row]);
 }
 
-function appendEvent_(ticketId, type, oldValue, newValue, performedBy, note, createdAt) {
-  appendObject_(APP.SHEETS.EVENTS, {
-    Event_ID: Utilities.getUuid(),
-    Ticket_ID: ticketId,
-    Event_Type: type,
-    Old_Value: oldValue,
-    New_Value: newValue,
-    Performed_By: performedBy,
-    Created_At: createdAt || new Date(),
-    Note: note || ''
-  });
-}
 
 function appendSlaCycle_(cycle) {
   appendObject_(APP.SHEETS.SLA_CYCLES, Object.assign({ SLA_Cycle_ID: Utilities.getUuid() }, cycle));
 }
 
-function getTicketSlaCycles_(ticketId) {
-  SLA_SCHEMA_RECOVERY_FAILED_ = false;
-  try {
-    if (!getSpreadsheet_().getSheetByName(APP.SHEETS.SLA_CYCLES)) getRequiredSheet_(APP.SHEETS.SLA_CYCLES);
-    return getSheetObjects_(APP.SHEETS.SLA_CYCLES)
-      .filter(cycle => String(cycle.Ticket_ID) === String(ticketId))
-      .sort((a, b) => number_(b.Cycle_Number, 0) - number_(a.Cycle_Number, 0));
-  } catch (err) {
-    SLA_SCHEMA_RECOVERY_FAILED_ = true;
-    console.error('SLA-cycle history is temporarily unavailable: ' + String(err && err.message || err));
-    return [];
-  }
-}
 
 function ensureLegacyInitialCycle_(ticket) {
   if (getTicketSlaCycles_(ticket.Ticket_ID).length) return false;
@@ -1035,57 +668,7 @@ function diagnoseWorkingSlaCalculation() {
   return results;
 }
 
-function serializeTicket_(t) {
-  const now = new Date();
-  const due = toDate_(t.SLA_Due_At);
-  const resolved = String(t.Status) === APP.STATUS.RESOLVED;
-  let liveSla = String(t.SLA_Result || '');
-  if (!resolved) liveSla = due < now ? 'OVERDUE' : 'ON TRACK';
 
-  return {
-    ticketId: String(t.Ticket_ID),
-    createdAt: formatDateTime_(t.Created_At),
-    createdAtIso: toDate_(t.Created_At).toISOString(),
-    raiserEmail: String(t.Raiser_Email),
-    raiserName: String(t.Raiser_Name || ''),
-    clientId: String(t.Client_ID || ''),
-    clientName: String(t.Client_Name),
-    clientType: String(t.Client_Type),
-    clientMode: String(t.Client_Mode),
-    categoryId: String(t.Category_ID),
-    categoryName: String(t.Category_Name),
-    emailSubject: String(t.Email_Subject),
-    issueDescription: String(t.Issue_Description),
-    priority: String(t.Priority),
-    slaHours: number_(t.SLA_Hours, 0),
-    slaDueAt: formatDateTime_(t.SLA_Due_At),
-    slaDueAtIso: due.toISOString(),
-    slaStatus: liveSla,
-    status: String(t.Status),
-    pickedUpBy: String(t.Picked_Up_By || ''),
-    pickedUpAt: formatDateTimeOptional_(t.Picked_Up_At),
-    investigatingAt: formatDateTimeOptional_(t.Investigating_At),
-    resolutionNote: String(t.Resolution_Note || ''),
-    rootCause: String(t.Root_Cause || ''),
-    resolvedBy: String(t.Resolved_By || ''),
-    resolvedAt: formatDateTimeOptional_(t.Resolved_At),
-    duplicateOf: String(t.Duplicate_Of || ''),
-    duplicateOverride: truthy_(t.Duplicate_Override),
-    attachmentFileName: String(t.Attachment_File_Name || ''),
-    attachmentUrl: String(t.Attachment_URL || ''),
-    updatedAt: formatDateTimeOptional_(t.Updated_At)
-  };
-}
-
-function serializeQueueTicket_(t) {
-  const full = serializeTicket_(t);
-  return {
-    ticketId: full.ticketId, createdAt: full.createdAt, createdAtIso: full.createdAtIso,
-    clientName: full.clientName, categoryName: full.categoryName, emailSubject: full.emailSubject,
-    priority: full.priority, status: full.status, slaStatus: full.slaStatus,
-    slaDueAt: full.slaDueAt, slaDueAtIso: full.slaDueAtIso, raiserEmail: full.raiserEmail
-  };
-}
 
 function queueSort_(a, b) {
   const statusRank = t => String(t.Status) === APP.STATUS.RESOLVED ? 2 : (toDate_(t.SLA_Due_At) < new Date() ? 0 : 1);
@@ -1118,43 +701,6 @@ function extractDynamicFields_(form, category) {
 
 // -------------------- Duplicate matching --------------------
 
-function getRecentTicketObjects_(cutoff, batchSize) {
-  const sheet = getRequiredSheet_(APP.SHEETS.TICKETS);
-  const lastRow = sheet.getLastRow();
-  const lastColumn = sheet.getLastColumn();
-  if (lastRow < 2 || lastColumn < 1) return { rows: [], processed: 0 };
-  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(String);
-  const createdIndex = headers.indexOf('Created_At');
-  if (createdIndex < 0) throw new Error(`Column Created_At not found in ${APP.SHEETS.TICKETS}.`);
-  const rows = [];
-  let endRow = lastRow;
-  let processed = 0;
-  let previousDate = null;
-  let mustFallback = false;
-  while (endRow >= 2) {
-    const count = Math.min(batchSize || 200, endRow - 1);
-    const startRow = endRow - count + 1;
-    const values = sheet.getRange(startRow, 1, count, lastColumn).getValues();
-    processed += values.length;
-    let reachedCutoff = false;
-    for (let i = values.length - 1; i >= 0; i--) {
-      const rawDate = values[i][createdIndex];
-      const date = rawDate instanceof Date ? rawDate : new Date(rawDate);
-      if (isNaN(date.getTime()) || (previousDate && date > previousDate)) { mustFallback = true; break; }
-      previousDate = date;
-      if (date < cutoff) { reachedCutoff = true; break; }
-      rows.push(headers.reduce((obj, h, j) => { obj[h] = values[i][j]; return obj; }, {}));
-    }
-    if (mustFallback) break;
-    if (reachedCutoff) return { rows, processed };
-    endRow = startRow - 1;
-  }
-  if (mustFallback) {
-    const all = getSheetObjects_(APP.SHEETS.TICKETS);
-    return { rows: all.filter(t => toDate_(t.Created_At) >= cutoff), processed: all.length };
-  }
-  return { rows, processed };
-}
 
 function buildClientKeyFromPayload_(payload) {
   const clientId = String(payload.clientId == null ? '' : payload.clientId).trim();
@@ -1274,7 +820,8 @@ function requireUser_() {
   return userFromRow_(row, email);
 }
 
-function getActiveClientSizePriorities_() {
+function getActiveClientSizePriorities_(forceRefresh) {
+  if (forceRefresh) removeCachedKeys_([CACHE_KEYS_.CLIENT_SIZES]);
   const cached = getCachedJson_(CACHE_KEYS_.CLIENT_SIZES);
   if (cached !== null) return cached;
   const rows = getSheetObjects_(APP.SHEETS.CLIENT_SIZE_PRIORITY).filter(row => truthy_(row.Active)).map(row => ({
@@ -1288,8 +835,10 @@ function getActiveClientSizePriorities_() {
 
 function resolveTicketPriority_(clientType, clientSizeCode, category) {
   if (String(clientType) === '360') {
-    const size = getActiveClientSizePriorities_().find(row => row.code === String(clientSizeCode || ''));
-    if (!size) throw new Error('Choose an active Client Size for a 360 client.');
+    const code = String(clientSizeCode || '');
+    let size = getActiveClientSizePriorities_().find(row => row.code === code);
+    if (!size) size = getActiveClientSizePriorities_(true).find(row => row.code === code);
+    if (!size) throw new Error('The selected client size is no longer active. Refresh the page and choose an active client size.');
     if (!['CRITICAL','HIGH','MEDIUM','LOW'].includes(size.priority)) throw new Error('The selected Client Size has an invalid configured priority.');
     if (!(size.slaHours > 0)) throw new Error('The selected Client Size has invalid configured SLA hours.');
     return { clientSize: size.code, priority: size.priority, prioritySource: 'CLIENT_SIZE', slaHours: size.slaHours, slaSource: 'CLIENT_SIZE' };
@@ -1302,7 +851,8 @@ function buildBootstrap_(user) {
   return { user, categories: getActiveCategories_(), clientSizes: getActiveClientSizePriorities_(),
     rootCauses: String(settings.ROOT_CAUSES || '').split('|').filter(Boolean),
     duplicateWindowDays: number_(settings.DUPLICATE_WINDOW_DAYS, 5), resolvedVisibilityDays: number_(settings.RESOLVED_VISIBILITY_DAYS, 10),
-    dashboardWindowDays: number_(settings.DASHBOARD_WINDOW_DAYS, 14), release: APP_RELEASE };
+    dashboardWindowDays: number_(settings.DASHBOARD_WINDOW_DAYS, 14), release: APP_RELEASE,
+    commit: APP_COMMIT === '__APP_COMMIT__' ? '' : APP_COMMIT };
 }
 
 function getInitialAppState() {
@@ -1310,9 +860,10 @@ function getInitialAppState() {
   ensureRuntimeSchema_();
   const email = getVerifiedCompanyEmail_(), row = getUserRowByEmail_(email);
   let result;
-  if (!row) result = { state: 'REGISTER', email, release: APP_RELEASE };
-  else if (!truthy_(row.Active)) result = { state: 'BLOCKED', email, message: 'Your access has been disabled. Please contact the application administrator.', release: APP_RELEASE };
-  else { const user = userFromRow_(row, email); result = { state: 'ACTIVE', email, name: user.name, role: user.role, user, bootstrap: buildBootstrap_(user), release: APP_RELEASE }; }
+  const commit = APP_COMMIT === '__APP_COMMIT__' ? '' : APP_COMMIT;
+  if (!row) result = { state: 'REGISTER', email, release: APP_RELEASE, commit };
+  else if (!truthy_(row.Active)) result = { state: 'BLOCKED', email, message: 'Your access has been disabled. Please contact the application administrator.', release: APP_RELEASE, commit };
+  else { const user = userFromRow_(row, email); result = { state: 'ACTIVE', email, name: user.name, role: user.role, user, bootstrap: buildBootstrap_(user), release: APP_RELEASE, commit }; }
   logPerformance_('getInitialAppState', startedAt, { rows: row ? 1 : 0 });
   return result;
 }
@@ -1402,14 +953,21 @@ function appendEvent_(ticketId,type,oldValue,newValue,performedBy,note,createdAt
 
 function submitTicket(form) {
   const startedAt=Date.now(),user=requireUser_();if(!form||typeof form!=='object')throw new Error('The form data was not received. Please refresh and try again.');
-  const requestId=cleanText_(form.submissionRequestId,100);if(!requestId)throw new Error('Submission_Request_ID is required. Refresh the form and try again.');
+  if (!String(form.clientMode || '').trim()) throw new Error('The client mode was not submitted. Refresh the page and choose the client status again.');
+  if (!cleanText_(form.clientName,200)) throw new Error('The client name was not submitted. Enter the client name and try again.');
+  if (!String(form.clientType || '').trim()) throw new Error('The client type was not submitted. Select a client type and try again.');
+  if (!String(form.categoryId || '').trim()) throw new Error('The category was not submitted. Refresh the page and select the category again.');
+  if (String(form.clientType) === '360' && !String(form.clientSize || '').trim()) throw new Error('The client size was not submitted. Select a client size and try again.');
+  if (!cleanText_(form.emailSubject,300)) throw new Error('The email subject was not submitted. Enter a subject and try again.');
+  if (!cleanText_(form.issueDescription,5000)) throw new Error('The issue description was not submitted. Enter the issue description and try again.');
+  const requestId=cleanText_(form.submissionRequestId,100);if(!requestId)throw new Error('The submission request ID was not submitted. Refresh the page and try again.');
   let existing=findTicketBySubmissionRequestId_(requestId);if(existing)return getTicketDetail(existing.object.Ticket_ID);
-  const category=getCategoryById_(form.categoryId);if(!category)throw new Error('The selected category is no longer active.');const client=resolveClient_(form,category.Client_Type);validateTicketForm_(form,category,client);const resolution=resolveTicketPriority_(client.type,form.clientSize,category);
+  const category=getCategoryById_(form.categoryId);if(!category)throw new Error('The selected category is no longer active. Refresh the page and choose an active category.');const client=resolveClient_(form,category.Client_Type);validateTicketForm_(form,category,client);const resolution=resolveTicketPriority_(client.type,form.clientSize,category);
   let ticketId,lock=LockService.getScriptLock(),lockStarted=Date.now();lock.waitLock(10000);try{ticketId=nextTicketId_();}finally{lock.releaseLock();}const lockWaitMs=Date.now()-lockStarted;
   let attachment={id:'',name:'',url:''};try{attachment=saveAttachment_(form.attachment,ticketId,user.email);}catch(err){throw err;}
   const createdAt=new Date(),slaHours=resolution.slaHours,slaDueAt=calculateWorkingSlaDueAt_(createdAt,slaHours),subject=cleanText_(form.emailSubject,300);
   const ticket={Ticket_ID:ticketId,Created_At:createdAt,Raiser_Email:user.email,Raiser_Name:user.name,Client_Mode:client.mode,Client_ID:client.id,Client_Name:client.name,Client_Type:client.type,Client_Size:resolution.clientSize,Category_ID:category.Category_ID,Category_Name:category.Category_Name,Email_Subject:subject,Normalized_Subject:normalizeSubject_(subject),Issue_Description:cleanText_(form.issueDescription,5000),Priority:resolution.priority,Priority_Source:resolution.prioritySource,SLA_Hours:slaHours,SLA_Source:resolution.slaSource,SLA_Due_At:slaDueAt,Status:APP.STATUS.RAISED,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',SLA_Result:'ON TRACK',Duplicate_Of:cleanText_(form.duplicateIds||'',500),Duplicate_Override:String(form.duplicateOverride||'').toLowerCase()==='true',Dynamic_Fields_JSON:JSON.stringify(extractDynamicFields_(form,category)),Attachment_File_ID:attachment.id,Attachment_File_Name:attachment.name,Attachment_URL:attachment.url,Updated_At:createdAt,Updated_By:user.email,Submission_Request_ID:requestId,Current_SLA_Cycle:1};
-  lock=LockService.getScriptLock();lockStarted=Date.now();lock.waitLock(10000);try{existing=findTicketBySubmissionRequestId_(requestId);if(existing){if(attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}return getTicketDetail(existing.object.Ticket_ID);}requireTicketSlaCyclesSchemaForWrite_(true);appendObject_(APP.SHEETS.TICKETS,ticket);appendSlaCycle_({Ticket_ID:ticketId,Cycle_Number:1,Cycle_Type:'INITIAL',Started_At:createdAt,Due_At:slaDueAt,SLA_Result:'OPEN',Started_By:user.email,Created_At:createdAt,Updated_At:createdAt});appendEvent_(ticketId,'TICKET_RAISED','',APP.STATUS.RAISED,user.email,ticket.Duplicate_Override?'Raised despite duplicate warning.':'',createdAt,requestId);upsertTicketIndex_(ticket);invalidateTicketCaches_();}catch(err){if(attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}throw err;}finally{lock.releaseLock();}
+  let ticketCommitted=false;lock=LockService.getScriptLock();lockStarted=Date.now();lock.waitLock(10000);try{existing=findTicketBySubmissionRequestId_(requestId);if(existing){if(attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}return getTicketDetail(existing.object.Ticket_ID);}requireTicketSlaCyclesSchemaForWrite_(true);appendObject_(APP.SHEETS.TICKETS,ticket);ticketCommitted=true;appendSlaCycle_({Ticket_ID:ticketId,Cycle_Number:1,Cycle_Type:'INITIAL',Started_At:createdAt,Due_At:slaDueAt,SLA_Result:'OPEN',Started_By:user.email,Created_At:createdAt,Updated_At:createdAt});appendEvent_(ticketId,'TICKET_RAISED','',APP.STATUS.RAISED,user.email,ticket.Duplicate_Override?'Raised despite duplicate warning.':'',createdAt,requestId);upsertTicketIndex_(ticket);invalidateTicketCaches_();}catch(err){if(!ticketCommitted&&attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}throw err;}finally{lock.releaseLock();}
   const detail=getTicketDetail(ticketId);try{sendSlackAlert_(detail);}catch(err){console.error('Slack alert failed.');}logPerformance_('submitTicket',startedAt,{rows:1,lockWaitMs:lockWaitMs+Date.now()-lockStarted});return detail;
 }
 
@@ -1427,8 +985,49 @@ function getRecentTicketObjects_(cutoff,batchSize) { const sheet=getRequiredShee
 
 /** Category lookup reuses the 300-second active-configuration cache. */
 function getCategoryById_(id) {
-  const category=getActiveCategories_().find(item=>String(item.id)===String(id));
+  let category=getActiveCategories_().find(item=>String(item.id)===String(id));
+  if (!category) {
+    removeCachedKeys_([CACHE_KEYS_.CATEGORIES]);
+    category=getActiveCategories_().find(item=>String(item.id)===String(id));
+  }
   return category ? {Category_ID:category.id,Client_Type:category.clientType,Category_Name:category.name,Priority:category.priority,SLA_Hours:category.slaHours,Fields_JSON:JSON.stringify(category.fields),Required_Fields_JSON:JSON.stringify(category.requiredFields),Active:true} : null;
+}
+
+/** Safe, read-only administrator diagnostic. It never returns row contents or identifiers. */
+function runEndToEndHealthCheck() {
+  requireRole_([APP.ROLES.ADMIN]);
+  const ss=getSpreadsheet_(),props=PropertiesService.getScriptProperties(),warnings=[],missingHeaders={},present={};
+  Object.keys(APP.HEADERS).forEach(name=>{
+    const sheet=ss.getSheetByName(name);present[name]=Boolean(sheet);
+    if(!sheet){missingHeaders[name]=APP.HEADERS[name].slice();return;}
+    const headers=sheet.getLastColumn()?sheet.getRange(1,1,1,sheet.getLastColumn()).getDisplayValues()[0].map(String):[];
+    const missing=APP.HEADERS[name].filter(header=>headers.indexOf(header)<0);if(missing.length)missingHeaders[name]=missing;
+  });
+  const categories=getActiveCategories_(),sizes=getActiveClientSizePriorities_(),settings=getSettings_();
+  const tickets=safeDataRowCount_(ss.getSheetByName(APP.SHEETS.TICKETS)),index=safeDataRowCount_(ss.getSheetByName(APP.SHEETS.TICKET_INDEX));
+  const triggers=ScriptApp.getProjectTriggers(),dispatcherCount=triggers.filter(t=>t.getHandlerFunction()==='dispatchSlackNotifications').length,monitorCount=triggers.filter(t=>t.getHandlerFunction()==='monitorSlackAlerts').length;
+  const requiredSettings=['COMPANY_DOMAIN','MAX_ATTACHMENT_MB','DUPLICATE_WINDOW_DAYS','DUPLICATE_SIMILARITY_THRESHOLD','RESOLVED_VISIBILITY_DAYS','DASHBOARD_WINDOW_DAYS','ROOT_CAUSES'];
+  const missingSettings=requiredSettings.filter(key=>String(settings[key]||'').trim()==='');
+  const auth=ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL).getAuthorizationStatus()===ScriptApp.AuthorizationStatus.REQUIRED?'REQUIRED':'NOT_REQUIRED';
+  if(tickets!==index)warnings.push('TicketIndex row count does not match Tickets; run repairApplicationSchema().');
+  if(dispatcherCount!==1)warnings.push('Slack dispatcher trigger count must be one.');if(monitorCount!==1)warnings.push('Slack monitor trigger count must be one.');
+  if(missingSettings.length)warnings.push('Required Settings keys are missing.');if(auth==='REQUIRED')warnings.push('Deployment-owner OAuth authorization is required.');
+  let webhook=false;try{webhook=Boolean(getSlackWebhookUrl_());}catch(ignore){}
+  const result={appRelease:APP_RELEASE,appCommit:APP_COMMIT==='__APP_COMMIT__'?'':APP_COMMIT,currentSchemaVersion:CURRENT_SCHEMA_VERSION,schemaPropertyVersion:Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_)||0),requiredSheetsPresent:present,missingHeadersBySheet:missingHeaders,active360CategoryCount:categories.filter(c=>c.clientType==='360').length,activeRegularCategoryCount:categories.filter(c=>c.clientType==='Regular').length,activeClientSizeCount:sizes.length,clientSizes:sizes.map(s=>({code:s.code,priority:s.priority,slaHours:s.slaHours})),ticketsRowCount:tickets,ticketIndexRowCount:index,ticketIndexConsistent:tickets===index,slackNotificationsSheetReady:Boolean(present[APP.SHEETS.SLACK_NOTIFICATIONS]&&!missingHeaders[APP.SHEETS.SLACK_NOTIFICATIONS]),slackWebhookConfigured:webhook,dispatcherTriggerCount:dispatcherCount,monitorTriggerCount:monitorCount,requiredSettingsPresent:missingSettings.length===0,missingSettingsKeys:missingSettings,oauthAuthorizationStatus:auth,timezone:APP.TZ,workingHours:{days:'Monday-Friday',start:'11:30',end:'19:30',overnight:false},warnings:warnings};
+  result.ready=Object.keys(present).every(k=>present[k])&&Object.keys(missingHeaders).length===0&&result.schemaPropertyVersion===CURRENT_SCHEMA_VERSION&&result.ticketIndexConsistent&&result.requiredSettingsPresent&&auth==='NOT_REQUIRED'&&result.slackNotificationsSheetReady&&webhook&&dispatcherCount===1&&monitorCount===1;
+  return result;
+}
+
+/** Validates and resolves a proposed submission without writing Sheets or Drive. */
+function testTicketSubmissionPayload(payload) {
+  requireRole_([APP.ROLES.ADMIN]);
+  if(!payload||typeof payload!=='object')throw new Error('The form data was not received.');
+  if(!String(payload.categoryId||'').trim())throw new Error('The category was not submitted. Refresh the page and select the category again.');
+  if(String(payload.clientType)==='360'&&!String(payload.clientSize||'').trim())throw new Error('The client size was not submitted. Select a client size and try again.');
+  const category=getCategoryById_(payload.categoryId);if(!category)throw new Error('The selected category is no longer active. Refresh the page and choose an active category.');
+  const client=resolveClient_(payload,category.Client_Type);validateTicketForm_(payload,category,client);
+  const resolved=resolveTicketPriority_(client.type,payload.clientSize,category),due=calculateWorkingSlaDueAt_(new Date(),resolved.slaHours);
+  return {clientType:client.type,clientSize:resolved.clientSize,categoryId:String(category.Category_ID),priority:resolved.priority,slaHours:resolved.slaHours,prioritySource:resolved.prioritySource,slaSource:resolved.slaSource,dueAt:formatDateTime_(due),dueAtIso:due.toISOString()};
 }
 
 // -------------------- Asynchronous Slack automation --------------------
@@ -1541,11 +1140,11 @@ function sendSlackWebhookPayload_(payload) {
   return {code:response.getResponseCode(),body:String(response.getContentText()||''),headers:response.getAllHeaders?response.getAllHeaders():{}};
 }
 function retryDelayMinutes_(attempt){return [1,5,15][Math.min(Math.max(attempt-1,0),2)];}
-function updateClaimedSlackRow_(notificationId,changes) { const lock=LockService.getScriptLock();lock.waitLock(5000);try{const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),id=headers.indexOf('Notification_ID'),rows=sheet.getLastRow()>1?sheet.getRange(2,id+1,sheet.getLastRow()-1,1).getDisplayValues():[];let row=0;rows.some((v,i)=>{if(String(v[0])===String(notificationId)){row=i+2;return true;}return false;});if(!row)return false;Object.keys(changes).forEach(key=>{const column=headers.indexOf(key);if(column>=0)sheet.getRange(row,column+1).setValue(changes[key]);});return true;}finally{lock.releaseLock();}}
+function updateClaimedSlackRow_(notificationId,changes) { const lock=LockService.getScriptLock();lock.waitLock(5000);try{const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),id=headers.indexOf('Notification_ID'),values=sheet.getLastRow()>1?sheet.getRange(2,1,sheet.getLastRow()-1,headers.length).getValues():[];let index=-1;values.some((row,i)=>{if(String(row[id])===String(notificationId)){index=i;return true;}return false;});if(index<0)return false;Object.keys(changes).forEach(key=>{const column=headers.indexOf(key);if(column>=0)values[index][column]=changes[key];});sheet.getRange(index+2,1,1,headers.length).setValues([values[index]]);return true;}finally{lock.releaseLock();}}
 function dispatchSlackNotifications() {
   const started=Date.now(),metrics={rowsScanned:0,notificationsEnqueued:0,notificationsSent:0,notificationsFailed:0,lockWaitMs:0};if(!slackEnabled_())return metrics;
   let claims=[];const settings=getSettings_(),now=new Date(),batch=Math.max(1,number_(settings.SLACK_DISPATCH_BATCH_SIZE,10)),timeout=number_(settings.SLACK_PROCESSING_TIMEOUT_MINUTES,10)*60000,lock=LockService.getScriptLock(),wait=Date.now();
-  try{lock.waitLock(5000);metrics.lockWaitMs=Date.now()-wait;const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),rows=queueObjects_(sheet);metrics.rowsScanned=rows.length;claims=rows.filter(row=>{const o=row.object,next=toDate_(o.Next_Attempt_At),processing=toDate_(o.Processing_Started_At);return(String(o.Status)==='PENDING'&&(!next||isNaN(next.getTime())||next<=now))||(String(o.Status)==='PROCESSING'&&processing&&!isNaN(processing.getTime())&&processing.getTime()<=now.getTime()-timeout);}).slice(0,batch);const status=headers.indexOf('Status'),processing=headers.indexOf('Processing_Started_At'),updated=headers.indexOf('Updated_At');claims.forEach(row=>{row.values[status]='PROCESSING';row.values[processing]=now;row.values[updated]=now;sheet.getRange(row.rowNumber,1,1,headers.length).setValues([row.values]);});}catch(error){console.error('dispatchSlackNotifications claim failed: '+slackEscape_(error.message,500));return metrics;}finally{lock.releaseLock();}
+  try{lock.waitLock(5000);metrics.lockWaitMs=Date.now()-wait;const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),rows=queueObjects_(sheet);metrics.rowsScanned=rows.length;claims=rows.filter(row=>{const o=row.object,next=toDate_(o.Next_Attempt_At),processing=toDate_(o.Processing_Started_At);return(String(o.Status)==='PENDING'&&(!next||isNaN(next.getTime())||next<=now))||(String(o.Status)==='PROCESSING'&&processing&&!isNaN(processing.getTime())&&processing.getTime()<=now.getTime()-timeout);}).slice(0,batch);const status=headers.indexOf('Status'),processing=headers.indexOf('Processing_Started_At'),updated=headers.indexOf('Updated_At');claims.forEach(row=>{row.values[status]='PROCESSING';row.values[processing]=now;row.values[updated]=now;});if(claims.length)sheet.getRange(2,1,rows.length,headers.length).setValues(rows.map(row=>row.values));}catch(error){console.error('dispatchSlackNotifications claim failed: '+slackEscape_(error.message,500));return metrics;}finally{lock.releaseLock();}
   claims.forEach(row=>{const o=row.object,id=o.Notification_ID,attempt=number_(o.Attempts,0)+1,max=Math.max(1,number_(settings.SLACK_MAX_RETRIES,3));try{let payload;try{payload=JSON.parse(String(o.Payload_JSON||''));if(!payload||typeof payload!=='object')throw new Error('not an object');}catch(parseError){updateClaimedSlackRow_(id,{Status:'FAILED',Attempts:attempt,Last_Error:'Invalid Payload_JSON',Updated_At:new Date()});metrics.notificationsFailed++;return;}const result=sendSlackWebhookPayload_(payload),code=result.code;if(code>=200&&code<300){updateClaimedSlackRow_(id,{Status:'SENT',Attempts:attempt,Sent_At:new Date(),Last_HTTP_Code:code,Last_Error:'',Updated_At:new Date()});metrics.notificationsSent++;return;}const temporary=code===429||(code>=500&&code<=599),retry=temporary&&attempt<max;let delay=retryDelayMinutes_(attempt);if(code===429){const h=result.headers||{},raw=h['Retry-After']||h['retry-after'];delay=Math.max(delay,Math.ceil(number_(Array.isArray(raw)?raw[0]:raw,0)/60));}updateClaimedSlackRow_(id,{Status:retry?'PENDING':'FAILED',Attempts:attempt,Next_Attempt_At:retry?new Date(Date.now()+delay*60000):'',Last_HTTP_Code:code,Last_Error:slackEscape_('Slack HTTP '+code,500),Updated_At:new Date()});if(!retry)metrics.notificationsFailed++;}catch(error){const retry=attempt<max;updateClaimedSlackRow_(id,{Status:retry?'PENDING':'FAILED',Attempts:attempt,Next_Attempt_At:retry?new Date(Date.now()+retryDelayMinutes_(attempt)*60000):'',Last_HTTP_Code:'',Last_Error:slackEscape_('Slack network request failed: '+String(error&&error.message||error).replace(/https:\/\/\S+/g,'[redacted]'),500),Updated_At:new Date()});if(!retry)metrics.notificationsFailed++;}});
   console.log(JSON.stringify(Object.assign({functionName:'dispatchSlackNotifications',durationMs:Date.now()-started},metrics)));return metrics;
 }

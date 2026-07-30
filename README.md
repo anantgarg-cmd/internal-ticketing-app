@@ -1,5 +1,37 @@
 # Internal Ticketing App
 
+## Ticketing stability release
+
+Release `ticketing-stability-v1` fixes HTML-form serialization during ticket submission. The form remains the object passed to `submitTicket(form)` so Apps Script continues to receive dynamic controls and the attachment blob. While the request is in flight, only action buttons are disabled; `aria-busy`, a pointer-event guard, and the request ID guard prevent editing and duplicate dispatch without disabling submitted inputs. A failed attempt restores the UI and retains its submission request ID for an idempotent retry; a confirmed success clears it so the next ticket receives a new ID.
+
+The backend now distinguishes missing request fields from inactive configuration and refreshes only the relevant 300-second category or Client Size cache once on a lookup miss. The safe editor functions `runEndToEndHealthCheck()` and `testTicketSubmissionPayload(payload)` provide non-mutating configuration and calculation diagnostics without returning spreadsheet, folder, webhook, OAuth, trigger, ticket, user, or payload secrets.
+
+### Required live DEV smoke test
+
+1. Merge this pull request into `develop` and wait for **Deploy Apps Script** to update the existing DEV deployment.
+2. In the DEV Apps Script editor, run `authorizeApplication()` and confirm `authorized: true`.
+3. Run `repairApplicationSchema()`; do not run `setupSystem()` against an existing installation.
+4. Run `runEndToEndHealthCheck()` and confirm `ready: true`, all required sheets/headers are present, index counts agree, and both Slack trigger counts are one.
+5. Open the existing domain-restricted DEV `/exec` URL and confirm the footer shows `ticketing-stability-v1` and the short deployed commit.
+6. Raise a 360 Gold / Platinum ticket with a PDF. Confirm one ticket, HIGH priority, the configured ClientSizePriority SLA, one INITIAL cycle, one TicketIndex row, one queued Slack notification, and a working attachment link.
+7. Raise a 360 Medium ticket and confirm the current administrator-configured Medium priority/SLA is used (not a seed default or category value).
+8. Raise a Regular ticket without Client Size and confirm its category supplies priority and SLA.
+9. Test an optional category with no attachment, PDF, PNG/JPG, required attachment missing, over-limit file, unsupported type, and retry after a forced backend failure. Confirm the retry creates one ticket/file and the form/file input is usable after failure.
+10. Trigger duplicate detection: verify **Go back** creates nothing, **Raise anyway** creates exactly one ticket, and rapid repeated clicks create no extra ticket.
+11. Move one ticket Raised → Investigating → Resolved, then reopen it and move Reopened → Investigating. Confirm one event per action request, one new REOPEN SLA cycle, and unchanged historical cycles.
+12. Run `testSlackConnection()` and `validateSlackAutomation()`. Confirm one notification per dedupe key/cycle, retries remain queued, and ticket writes never wait for a webhook.
+13. Confirm no error toast remains and Work Queue, My Raised Tickets, SLA Dashboard, pagination, and attachment links all load for the appropriate SALES, POC, and ADMIN roles.
+
+### Production promotion (only after every DEV check passes)
+
+1. Record the DEV health-check output and smoke-test evidence; resolve every warning.
+2. Merge `develop` into `main` through review—never commit directly to `main`.
+3. Wait for the existing workflow to stamp the main commit and update the existing Production deployment.
+4. Run `authorizeApplication()` as the Production deployment owner if authorization is required, then run `repairApplicationSchema()` and `runEndToEndHealthCheck()` in Production.
+5. Confirm `ready: true`, the Production `/exec` footer release/commit, and a controlled 360, Regular, lifecycle, attachment, duplicate, dashboard, and Slack smoke test.
+
+Schema repair is additive: it does not delete historical ticket/event/SLA data, reorder existing columns, or overwrite administrator-edited Settings, Categories, Clients, or ClientSizePriority values.
+
 This Google Apps Script web app is deployed for the Shadowfax Workspace domain. It runs as the deployment owner; regular users must never be asked to grant Spreadsheet, Drive, or external-request permissions.
 
 ## Deployment-owner OAuth authorization
