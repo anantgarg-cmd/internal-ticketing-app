@@ -3,7 +3,7 @@
  * Do not put passwords or the Slack webhook directly in this file.
  */
 
-const APP_RELEASE = 'shadowfax-world-class-ui-v1';
+const APP_RELEASE = 'shadowfax-ui-stability-v2';
 const APP_COMMIT = '__APP_COMMIT__';
 let SPREADSHEET_INSTANCE_ = null;
 let SLA_SCHEMA_RECOVERY_FAILED_ = false;
