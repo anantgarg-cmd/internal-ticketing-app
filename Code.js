@@ -5,7 +5,11 @@
 
 const APP_RELEASE = 'registration-v2';
 const APP_COMMIT = '__APP_COMMIT__';
+const APP_SCHEMA_VERSION = 'sla-cycles-v1';
+const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
+const SLA_SCHEMA_ADMIN_MESSAGE_ = 'The SLA-cycle schema could not be prepared. Please ask the application administrator to run upgradeSlaCycleSchema() once.';
 let SPREADSHEET_INSTANCE_ = null;
+let SLA_SCHEMA_RECOVERY_FAILED_ = false;
 const DEPLOYMENT_AUTHORIZATION_MESSAGE = 'The application deployment has not been authorized by its deploying account. Please ask the application administrator to run authorizeApplication() once from the Apps Script editor.';
 const CACHE_KEYS_ = Object.freeze({
   SETTINGS: 'app:settings:v1',
@@ -81,6 +85,7 @@ function buildBootstrap_(user) {
 
 function getInitialAppState() {
   const startedAt = Date.now();
+  const schema = ensureRuntimeSchema_();
   const email = getVerifiedCompanyEmail_();
   const users = getSheetObjects_(APP.SHEETS.USERS);
   const row = users.find(u => lower_(u.Email) === email);
@@ -91,6 +96,7 @@ function getInitialAppState() {
     const user = userFromRow_(row, email);
     result = { state: 'ACTIVE', email, name: user.name, role: user.role, bootstrap: buildBootstrap_(user), release: APP_RELEASE };
   }
+  if (!schema.ready) result.schemaRecoverable = true;
   logPerformance_('getInitialAppState', startedAt, { rows: users.length });
   return result;
 }
@@ -144,6 +150,7 @@ function submitTicket(form) {
   let ticketId;
   let attachment = { id: '', name: '', url: '' };
   try {
+    requireTicketSlaCyclesSchemaForWrite_(true);
     ticketId = nextTicketId_();
     attachment = saveAttachment_(form.attachment, ticketId, user.email);
 
@@ -276,6 +283,7 @@ function getTicketDetail(ticketId) {
   const result = serializeTicket_(found.object);
   result.dynamicFields = safeJsonParse_(found.object.Dynamic_Fields_JSON, {});
   result.slaCycles = getTicketSlaCycles_(ticketId).map(serializeSlaCycle_);
+  result.slaHistoryPreparing = SLA_SCHEMA_RECOVERY_FAILED_;
   result.slaCycleNumber = result.slaCycles.length ? Math.max.apply(null, result.slaCycles.map(c => c.cycleNumber)) : 0;
   result.reopenCount = result.slaCycles.filter(c => c.cycleType === 'REOPEN').length;
   result.canReopen = String(found.object.Status) === APP.STATUS.RESOLVED &&
@@ -303,6 +311,7 @@ function updateTicketStatus(payload) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
+    requireTicketSlaCyclesSchemaForWrite_(true);
     const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', payload.ticketId);
     if (!found) throw new Error('Ticket not found.');
     const ticket = found.object;
@@ -382,6 +391,7 @@ function reopenTicket(payload) {
   lock.waitLock(30000);
   let reopened;
   try {
+    requireTicketSlaCyclesSchemaForWrite_(true);
     const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', payload.ticketId);
     if (!found) throw new Error('Ticket not found.');
     const ticket = found.object;
@@ -793,6 +803,38 @@ function getCategoryById_(id) {
     .find(r => String(r.Category_ID) === String(id) && truthy_(r.Active));
 }
 
+/** Performs the deployment schema check once per schema version. */
+function ensureRuntimeSchema_() {
+  const properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty(APP_SCHEMA_VERSION_PROPERTY_) === APP_SCHEMA_VERSION) return { ready: true, checked: false };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (properties.getProperty(APP_SCHEMA_VERSION_PROPERTY_) === APP_SCHEMA_VERSION) return { ready: true, checked: false };
+    const result = ensureTicketSlaCyclesSchema_(true);
+    if (!result.ready) throw new Error(SLA_SCHEMA_ADMIN_MESSAGE_);
+    properties.setProperty(APP_SCHEMA_VERSION_PROPERTY_, APP_SCHEMA_VERSION);
+    return { ready: true, checked: true, sheetCreated: result.sheetCreated, columnsAdded: result.columnsAdded };
+  } catch (err) {
+    console.error('SLA-cycle runtime schema preparation failed: ' + String(err && err.message || err));
+    return { ready: false, checked: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Write paths must fail clearly rather than silently losing cycle history. */
+function requireTicketSlaCyclesSchemaForWrite_(lockAlreadyHeld) {
+  try {
+    const result = ensureTicketSlaCyclesSchema_(Boolean(lockAlreadyHeld));
+    if (!result.ready) throw new Error(SLA_SCHEMA_ADMIN_MESSAGE_);
+    return result;
+  } catch (err) {
+    console.error('SLA-cycle write schema preparation failed: ' + String(err && err.message || err));
+    throw new Error(SLA_SCHEMA_ADMIN_MESSAGE_);
+  }
+}
+
 function getSheetObjects_(sheetName) {
   const sheet = getSpreadsheet_().getSheetByName(sheetName);
   if (!sheet) throw new Error(`Missing sheet: ${sheetName}`);
@@ -860,9 +902,17 @@ function appendSlaCycle_(cycle) {
 }
 
 function getTicketSlaCycles_(ticketId) {
-  return getSheetObjects_(APP.SHEETS.SLA_CYCLES)
-    .filter(cycle => String(cycle.Ticket_ID) === String(ticketId))
-    .sort((a, b) => number_(b.Cycle_Number, 0) - number_(a.Cycle_Number, 0));
+  SLA_SCHEMA_RECOVERY_FAILED_ = false;
+  try {
+    if (!getSpreadsheet_().getSheetByName(APP.SHEETS.SLA_CYCLES)) ensureTicketSlaCyclesSchema_();
+    return getSheetObjects_(APP.SHEETS.SLA_CYCLES)
+      .filter(cycle => String(cycle.Ticket_ID) === String(ticketId))
+      .sort((a, b) => number_(b.Cycle_Number, 0) - number_(a.Cycle_Number, 0));
+  } catch (err) {
+    SLA_SCHEMA_RECOVERY_FAILED_ = true;
+    console.error('SLA-cycle history is temporarily unavailable: ' + String(err && err.message || err));
+    return [];
+  }
 }
 
 function ensureLegacyInitialCycle_(ticket) {

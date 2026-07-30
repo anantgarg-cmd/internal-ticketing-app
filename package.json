@@ -4,7 +4,7 @@
   "description": "",
   "main": "Code.js",
   "scripts": {
-    "test": "node test/working-sla.test.js"
+    "test": "node test/working-sla.test.js && node test/schema-recovery.test.js"
   },
   "keywords": [],
   "author": "",
