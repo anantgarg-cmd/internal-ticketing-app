@@ -13,17 +13,17 @@ for (const source of [code, setup]) {
 const duplicates = [...new Set(declarations.filter((name, i) => declarations.indexOf(name) !== i))];
 assert.deepStrictEqual(duplicates, [], `duplicate top-level production functions: ${duplicates.join(', ')}`);
 
-assert(code.includes("const APP_RELEASE = 'ticketing-stability-v1'"));
-assert(html.includes("const EXPECTED_RELEASE = 'ticketing-stability-v1'"));
+assert(code.includes("const APP_RELEASE = 'sales-tickets-search-loader-v1'"));
+assert(html.includes("const EXPECTED_RELEASE = 'sales-tickets-search-loader-v1'"));
 assert(html.includes("if(IN_FLIGHT.has(requestKey))return"));
 assert(html.includes("form.setAttribute('aria-busy','true')"));
 assert(html.includes("form.classList.add('form-submitting')"));
-assert(html.includes('.submitTicket(form)'));
+assert(html.includes("method:'submitTicket',payload:form"));
 assert(html.includes("rid.value=SUBMISSION_REQUEST_ID"));
 assert(html.includes("SUBMISSION_REQUEST_ID=''"));
 assert(!html.includes('Array.from(form.elements).forEach(x=>x.disabled=true)'));
 assert(!html.includes('Array.from(form.elements).forEach(x=>x.disabled=false)'));
-assert(html.indexOf('rid.value=SUBMISSION_REQUEST_ID') < html.indexOf('.submitTicket(form)'));
+assert(html.indexOf('rid.value=SUBMISSION_REQUEST_ID') < html.indexOf("method:'submitTicket',payload:form"));
 
 for (const field of ['clientMode','clientName','clientType','categoryId','emailSubject','issueDescription','submissionRequestId']) {
   assert(code.includes(`form.${field}`), `submit contract must validate/read ${field}`);

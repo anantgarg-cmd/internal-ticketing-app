@@ -1,0 +1,44 @@
+const assert = require('assert');
+const fs = require('fs');
+const vm = require('vm');
+const code = fs.readFileSync('Code.js', 'utf8');
+const setup = fs.readFileSync('Setup.js', 'utf8');
+const html = fs.readFileSync('Index.html', 'utf8');
+const context = { console, Date, JSON, Math, Object, String, Number, Boolean, Array, RegExp, Set, Map };
+vm.createContext(context); vm.runInContext(setup + '\n' + code, context);
+
+const roles = {'a@shadowfax.in':'SALES','b@shadowfax.in':'sales','p@shadowfax.in':'POC','admin@shadowfax.in':'ADMIN'};
+assert(context.isSalesRaisedTicket_({Raiser_Email:'A@SHADOWFAX.IN'}, roles));
+assert(context.isSalesRaisedTicket_({Raiser_Email:'b@shadowfax.in'}, roles));
+assert(!context.isSalesRaisedTicket_({Raiser_Email:'p@shadowfax.in'}, roles));
+assert(!context.isSalesRaisedTicket_({Raiser_Email:'admin@shadowfax.in'}, roles));
+assert(!context.isSalesRaisedTicket_({Raiser_Email:'unknown@shadowfax.in'}, roles));
+assert(!context.isSalesRaisedTicket_({Raiser_Email:''}, roles));
+
+const ticket={Ticket_ID:'T-123',Client_ID:'C-9',Client_Name:'Acme Client',Client_Type:'360',Client_Size:'Large',Category_Name:'API Failure',Email_Subject:'Webhook Timeout',Raiser_Name:'Sales Person',Raiser_Email:'a@shadowfax.in',Priority:'HIGH',Status:'Raised',SLA_Due_At:new Date(Date.now()+60000)};
+for(const search of ['t-123','C-9','acme client','360','large','api failure','webhook timeout','sales person','A@SHADOWFAX.IN','high','raised','on track']) assert(context.ticketMatchesActivitySearch_(ticket,search.toLowerCase()), search);
+assert(context.ticketMatchesActivitySearch_(ticket,''));
+assert(code.includes("search=lower_(options&&options.search).trim()"));
+assert(code.indexOf('.filter(t=>ticketMatchesActivitySearch_') < code.indexOf('const page=paginate_(filtered'));
+assert(code.includes("requireRole_([APP.ROLES.POC,APP.ROLES.ADMIN])"));
+assert(code.includes("throw new Error('You are not allowed to view this ticket.')"));
+assert(code.includes('assertCanReopen_(user, found.object)'));
+assert(code.includes('assertCanReopen_(user,ticket)'));
+
+assert(html.includes("TAB_CACHE = { activity: new Map()"));
+assert(html.includes("scope:BOOT.user.role==='SALES'?'sales':'personal'"));
+assert(html.includes("MY_STATE.page=1;loadMyTickets()"));
+assert(html.includes("setTimeout(()=>{MY_STATE.search=activitySearch.value.trim();MY_STATE.page=1;loadMyTickets();},300)"));
+assert(html.includes('Sales Tickets') && html.includes('Tickets Raised by Me'));
+assert(!html.includes('My Raised Tickets'));
+assert(html.includes('View and search open tickets and recently resolved requests raised by the Sales team.'));
+assert(html.includes('global-processing-loader') && html.includes('global-processing-card'));
+assert(html.includes('},175)'));
+assert(html.includes('options.showLoader===false'));
+assert(html.includes("method:'getInitialAppState',showLoader:false"));
+assert(html.includes('.getSlaDuePreview(categoryId,sizeCode)'));
+assert(html.includes("method:'submitTicket',payload:form"));
+for(const message of ['Setting up your workspace…','Checking for similar tickets…','Uploading evidence and creating your ticket…','Loading Sales tickets…','Loading your tickets…','Loading the work queue…','Loading ticket details…','Updating ticket status…','Preparing the new SLA cycle…','Reopening the ticket…','Loading SLA dashboard…']) assert(html.includes(message), message);
+assert(html.includes('@media(prefers-reduced-motion:reduce)'));
+assert(html.includes('function fatal(err){hideGlobalLoader()'));
+console.log('sales visibility, activity search/cache, permissions, labels, and global loader contracts passed');
