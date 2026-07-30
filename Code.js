@@ -192,6 +192,10 @@ function submitTicket(form) {
     };
 
     appendObject_(APP.SHEETS.TICKETS, ticket);
+    appendSlaCycle_({
+      Ticket_ID: ticketId, Cycle_Number: 1, Cycle_Type: 'INITIAL', Started_At: createdAt, Due_At: slaDueAt,
+      SLA_Result: 'OPEN', Started_By: user.email, Created_At: createdAt, Updated_At: createdAt
+    });
     appendEvent_(ticketId, 'TICKET_RAISED', '', APP.STATUS.RAISED, user.email, duplicateOverride ? 'Raised despite duplicate warning.' : '');
     removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
   } finally {
@@ -271,6 +275,11 @@ function getTicketDetail(ticketId) {
   }
   const result = serializeTicket_(found.object);
   result.dynamicFields = safeJsonParse_(found.object.Dynamic_Fields_JSON, {});
+  result.slaCycles = getTicketSlaCycles_(ticketId).map(serializeSlaCycle_);
+  result.slaCycleNumber = result.slaCycles.length ? Math.max.apply(null, result.slaCycles.map(c => c.cycleNumber)) : 0;
+  result.reopenCount = result.slaCycles.filter(c => c.cycleType === 'REOPEN').length;
+  result.canReopen = String(found.object.Status) === APP.STATUS.RESOLVED &&
+    (user.role === APP.ROLES.POC || user.role === APP.ROLES.ADMIN || lower_(found.object.Raiser_Email) === user.email);
   result.events = getSheetObjects_(APP.SHEETS.EVENTS)
     .filter(e => String(e.Ticket_ID) === String(ticketId))
     .sort((a, b) => toDate_(a.Created_At) - toDate_(b.Created_At))
@@ -300,9 +309,14 @@ function updateTicketStatus(payload) {
     const oldStatus = String(ticket.Status);
     const newStatus = String(payload.newStatus);
 
-    if (oldStatus === APP.STATUS.RESOLVED) throw new Error('Resolved tickets are read-only in v1.');
-    if (oldStatus === APP.STATUS.RAISED && newStatus !== APP.STATUS.INVESTIGATING) {
-      throw new Error('A Raised ticket must first move to Investigating.');
+    const allowedTransitions = {};
+    allowedTransitions[APP.STATUS.RAISED] = APP.STATUS.INVESTIGATING;
+    allowedTransitions[APP.STATUS.REOPENED] = APP.STATUS.INVESTIGATING;
+    allowedTransitions[APP.STATUS.INVESTIGATING] = APP.STATUS.RESOLVED;
+    if (allowedTransitions[oldStatus] !== newStatus) throw new Error(`Transition from ${oldStatus} to ${newStatus} is not allowed.`);
+    if (oldStatus === APP.STATUS.RESOLVED) throw new Error('Resolved tickets can only be reopened.');
+    if ([APP.STATUS.RAISED, APP.STATUS.REOPENED].includes(oldStatus) && newStatus !== APP.STATUS.INVESTIGATING) {
+      throw new Error(`A ${oldStatus} ticket must first move to Investigating.`);
     }
     if (oldStatus === APP.STATUS.INVESTIGATING && newStatus !== APP.STATUS.RESOLVED) {
       throw new Error('An Investigating ticket can only move to Resolved.');
@@ -331,6 +345,8 @@ function updateTicketStatus(payload) {
       changes.Resolved_By = user.email;
       changes.Resolved_At = now;
       changes.SLA_Result = now <= toDate_(ticket.SLA_Due_At) ? 'MET' : 'BREACHED';
+      ensureOpenInitialCycle_(ticket);
+      closeOpenSlaCycle_(payload.ticketId, now, user.email, changes.SLA_Result);
     }
 
     updateObjectRow_(APP.SHEETS.TICKETS, found.rowNumber, changes);
@@ -343,6 +359,66 @@ function updateTicketStatus(payload) {
   const result = getTicketDetail(payload.ticketId);
   logPerformance_('updateTicketStatus', startedAt, { rows: 1 });
   return result;
+}
+
+function getReopenPreview(ticketId) {
+  const user = requireUser_();
+  const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', ticketId);
+  if (!found) throw new Error('Ticket not found.');
+  assertCanReopen_(user, found.object);
+  const dueAt = calculateWorkingSlaDueAt_(new Date(), number_(found.object.SLA_Hours, 0));
+  return { dueAt: formatDateTime_(dueAt), dueAtIso: dueAt.toISOString() };
+}
+
+/** Reopens one resolved ticket and starts an independent SLA cycle. */
+function reopenTicket(payload) {
+  const startedAt = Date.now();
+  const user = requireUser_();
+  if (!payload || !payload.ticketId) throw new Error('Ticket is required.');
+  const reason = cleanText_(payload.reopenReason, 5001);
+  if (!reason) throw new Error('Reason for reopening / latest client response is mandatory.');
+  if (reason.length > 5000) throw new Error('Reopening reason must be 5,000 characters or fewer.');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  let reopened;
+  try {
+    const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', payload.ticketId);
+    if (!found) throw new Error('Ticket not found.');
+    const ticket = found.object;
+    assertCanReopen_(user, ticket);
+    ensureLegacyInitialCycle_(ticket);
+    const cycles = getTicketSlaCycles_(payload.ticketId);
+    if (cycles.some(cycle => String(cycle.SLA_Result) === 'OPEN')) throw new Error('This ticket already has an open SLA cycle.');
+    const reopenedAt = new Date();
+    const dueAt = calculateWorkingSlaDueAt_(reopenedAt, number_(ticket.SLA_Hours, 0));
+    const cycleNumber = cycles.reduce((max, cycle) => Math.max(max, number_(cycle.Cycle_Number, 0)), 0) + 1;
+    updateObjectRow_(APP.SHEETS.TICKETS, found.rowNumber, {
+      Status: APP.STATUS.REOPENED, SLA_Due_At: dueAt, SLA_Result: '', Updated_At: reopenedAt, Updated_By: user.email,
+      Picked_Up_By: '', Picked_Up_At: '', Investigating_At: '', Resolution_Note: '', Root_Cause: '', Resolved_By: '', Resolved_At: ''
+    });
+    appendSlaCycle_({
+      Ticket_ID: payload.ticketId, Cycle_Number: cycleNumber, Cycle_Type: 'REOPEN', Started_At: reopenedAt,
+      Due_At: dueAt, SLA_Result: 'OPEN', Started_By: user.email, Reopen_Reason: reason,
+      Created_At: reopenedAt, Updated_At: reopenedAt
+    });
+    appendEvent_(payload.ticketId, 'TICKET_REOPENED', APP.STATUS.RESOLVED, APP.STATUS.REOPENED, user.email, reason, reopenedAt);
+    removeCachedKeys_([CACHE_KEYS_.NUMBERS]);
+    reopened = { ticketId: payload.ticketId, reopenedAt };
+  } finally { lock.releaseLock(); }
+  const detail = getTicketDetail(reopened.ticketId);
+  try { sendSlackReopenedAlert_(detail, user.email, reason); } catch (err) {
+    if (String(err && err.message || '') === DEPLOYMENT_AUTHORIZATION_MESSAGE) throw err;
+    console.error('Slack reopen alert failed: ' + err.message);
+  }
+  logPerformance_('reopenTicket', startedAt, { rows: 1 });
+  return detail;
+}
+
+function assertCanReopen_(user, ticket) {
+  if (String(ticket.Status) !== APP.STATUS.RESOLVED) throw new Error('Only a Resolved ticket can be reopened.');
+  if (![APP.ROLES.POC, APP.ROLES.ADMIN].includes(user.role) && lower_(ticket.Raiser_Email) !== user.email) {
+    throw new Error('You are not allowed to reopen another user\'s ticket.');
+  }
 }
 
 function getNumbers() {
@@ -639,6 +715,22 @@ function sendSlackAlert_(ticket) {
   }
 }
 
+function sendSlackReopenedAlert_(ticket, reopenedBy, reason) {
+  const webhook = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
+  if (!webhook) return;
+  const appUrl = PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || ScriptApp.getService().getUrl() || '';
+  const text = [
+    '🔄 *Internal Ticket Reopened*', `*Ticket:* ${ticket.ticketId}`, `*Client:* ${ticket.clientName}`,
+    `*Category:* ${ticket.categoryName}`, `*Priority:* ${ticket.priority}`, `*Reopened by:* ${reopenedBy}`,
+    `*Reason:* ${reason}`, `*New SLA due:* ${ticket.slaDueAt}`, appUrl ? `*Open app:* ${appUrl}` : ''
+  ].filter(Boolean).join('\n');
+  let response;
+  try {
+    response = UrlFetchApp.fetch(webhook, { method: 'post', contentType: 'application/json', payload: JSON.stringify({ text }), muteHttpExceptions: true });
+  } catch (err) { throwServiceAuthorizationError_(err); }
+  if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) throw new Error(`Slack returned ${response.getResponseCode()}.`);
+}
+
 // -------------------- Sheet helpers --------------------
 
 function getSpreadsheet_() {
@@ -750,7 +842,7 @@ function updateObjectRow_(sheetName, rowNumber, changes) {
   range.setValues([row]);
 }
 
-function appendEvent_(ticketId, type, oldValue, newValue, performedBy, note) {
+function appendEvent_(ticketId, type, oldValue, newValue, performedBy, note, createdAt) {
   appendObject_(APP.SHEETS.EVENTS, {
     Event_ID: Utilities.getUuid(),
     Ticket_ID: ticketId,
@@ -758,9 +850,82 @@ function appendEvent_(ticketId, type, oldValue, newValue, performedBy, note) {
     Old_Value: oldValue,
     New_Value: newValue,
     Performed_By: performedBy,
-    Created_At: new Date(),
+    Created_At: createdAt || new Date(),
     Note: note || ''
   });
+}
+
+function appendSlaCycle_(cycle) {
+  appendObject_(APP.SHEETS.SLA_CYCLES, Object.assign({ SLA_Cycle_ID: Utilities.getUuid() }, cycle));
+}
+
+function getTicketSlaCycles_(ticketId) {
+  return getSheetObjects_(APP.SHEETS.SLA_CYCLES)
+    .filter(cycle => String(cycle.Ticket_ID) === String(ticketId))
+    .sort((a, b) => number_(b.Cycle_Number, 0) - number_(a.Cycle_Number, 0));
+}
+
+function ensureLegacyInitialCycle_(ticket) {
+  if (getTicketSlaCycles_(ticket.Ticket_ID).length) return false;
+  const result = ['MET', 'BREACHED'].includes(String(ticket.SLA_Result))
+    ? String(ticket.SLA_Result)
+    : (toDate_(ticket.Resolved_At) <= toDate_(ticket.SLA_Due_At) ? 'MET' : 'BREACHED');
+  appendSlaCycle_({
+    Ticket_ID: ticket.Ticket_ID, Cycle_Number: 1, Cycle_Type: 'INITIAL', Started_At: ticket.Created_At,
+    Due_At: ticket.SLA_Due_At, Ended_At: ticket.Resolved_At, SLA_Result: result,
+    Started_By: ticket.Raiser_Email, Ended_By: ticket.Resolved_By, Created_At: ticket.Created_At,
+    Updated_At: ticket.Resolved_At || ticket.Created_At
+  });
+  return true;
+}
+
+function ensureOpenInitialCycle_(ticket) {
+  if (getTicketSlaCycles_(ticket.Ticket_ID).length) return false;
+  appendSlaCycle_({
+    Ticket_ID: ticket.Ticket_ID, Cycle_Number: 1, Cycle_Type: 'INITIAL', Started_At: ticket.Created_At,
+    Due_At: ticket.SLA_Due_At, SLA_Result: 'OPEN', Started_By: ticket.Raiser_Email,
+    Created_At: ticket.Created_At, Updated_At: ticket.Created_At
+  });
+  return true;
+}
+
+function closeOpenSlaCycle_(ticketId, endedAt, endedBy, result) {
+  const cycles = getTicketSlaCycles_(ticketId).filter(cycle => String(cycle.SLA_Result) === 'OPEN');
+  if (cycles.length !== 1) throw new Error(`Expected exactly one OPEN SLA cycle; found ${cycles.length}.`);
+  const id = cycles[0].SLA_Cycle_ID;
+  const found = findObjectRow_(APP.SHEETS.SLA_CYCLES, 'SLA_Cycle_ID', id);
+  updateObjectRow_(APP.SHEETS.SLA_CYCLES, found.rowNumber, { Ended_At: endedAt, Ended_By: endedBy, SLA_Result: result, Updated_At: endedAt });
+}
+
+function serializeSlaCycle_(cycle) {
+  return {
+    cycleNumber: number_(cycle.Cycle_Number, 0), cycleType: String(cycle.Cycle_Type),
+    startedAt: formatDateTimeOptional_(cycle.Started_At), dueAt: formatDateTimeOptional_(cycle.Due_At),
+    endedAt: formatDateTimeOptional_(cycle.Ended_At), slaResult: String(cycle.SLA_Result),
+    startedBy: String(cycle.Started_By || ''), endedBy: String(cycle.Ended_By || ''), reopenReason: String(cycle.Reopen_Reason || '')
+  };
+}
+
+/** Optional admin-only, on-demand legacy migration. Never called automatically. */
+function backfillTicketSlaCycles() {
+  requireRole_([APP.ROLES.ADMIN]);
+  const lock = LockService.getScriptLock(); lock.waitLock(30000);
+  let created = 0;
+  try {
+    getSheetObjects_(APP.SHEETS.TICKETS).forEach(ticket => {
+      if (!getTicketSlaCycles_(ticket.Ticket_ID).length) {
+        const resolved = String(ticket.Status) === APP.STATUS.RESOLVED;
+        appendSlaCycle_({
+          Ticket_ID: ticket.Ticket_ID, Cycle_Number: 1, Cycle_Type: 'INITIAL', Started_At: ticket.Created_At,
+          Due_At: ticket.SLA_Due_At, Ended_At: resolved ? ticket.Resolved_At : '',
+          SLA_Result: resolved ? (String(ticket.SLA_Result) || (toDate_(ticket.Resolved_At) <= toDate_(ticket.SLA_Due_At) ? 'MET' : 'BREACHED')) : 'OPEN',
+          Started_By: ticket.Raiser_Email, Ended_By: resolved ? ticket.Resolved_By : '', Created_At: ticket.Created_At,
+          Updated_At: resolved ? (ticket.Resolved_At || ticket.Created_At) : ticket.Created_At
+        }); created++;
+      }
+    });
+  } finally { lock.releaseLock(); }
+  return { created };
 }
 
 function nextTicketId_() {
