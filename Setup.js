@@ -12,10 +12,11 @@ const APP = Object.freeze({
     CATEGORIES: 'Categories',
     USERS: 'Users',
     EVENTS: 'TicketEvents',
-    SETTINGS: 'Settings'
+    SETTINGS: 'Settings',
+    SLA_CYCLES: 'TicketSLACycles'
   }),
   ROLES: Object.freeze({ SALES: 'SALES', POC: 'POC', ADMIN: 'ADMIN' }),
-  STATUS: Object.freeze({ RAISED: 'Raised', INVESTIGATING: 'Investigating', RESOLVED: 'Resolved' }),
+  STATUS: Object.freeze({ RAISED: 'Raised', REOPENED: 'Reopened', INVESTIGATING: 'Investigating', RESOLVED: 'Resolved' }),
   HEADERS: Object.freeze({
     Tickets: [
       'Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_Mode','Client_ID','Client_Name','Client_Type',
@@ -28,7 +29,11 @@ const APP = Object.freeze({
     Categories: ['Category_ID','Client_Type','Category_Name','Priority','SLA_Hours','Fields_JSON','Required_Fields_JSON','Active'],
     Users: ['Email','Name','Role','Active'],
     TicketEvents: ['Event_ID','Ticket_ID','Event_Type','Old_Value','New_Value','Performed_By','Created_At','Note'],
-    Settings: ['Key','Value','Description']
+    Settings: ['Key','Value','Description'],
+    TicketSLACycles: [
+      'SLA_Cycle_ID','Ticket_ID','Cycle_Number','Cycle_Type','Started_At','Due_At','Ended_At','SLA_Result',
+      'Started_By','Ended_By','Reopen_Reason','Created_At','Updated_At'
+    ]
   })
 });
 
@@ -172,4 +177,23 @@ function formatSheets_(ss) {
 
   const events = ss.getSheetByName(APP.SHEETS.EVENTS);
   events.getRange('G:G').setNumberFormat('dd-mmm-yyyy hh:mm');
+
+  const cycles = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
+  cycles.getRange('E:G').setNumberFormat('dd-mmm-yyyy hh:mm');
+  cycles.getRange('L:M').setNumberFormat('dd-mmm-yyyy hh:mm');
+}
+
+/** Safe, idempotent one-time upgrade for existing installations. */
+function upgradeSlaCycleSchema() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet() || getSpreadsheet_();
+  let sheet = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
+  if (!sheet) sheet = ss.insertSheet(APP.SHEETS.SLA_CYCLES);
+  const headers = APP.HEADERS.TicketSLACycles;
+  const firstRow = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getDisplayValues()[0] : [];
+  if (!firstRow.some(value => String(value).trim())) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  else if (firstRow.slice(0, headers.length).join('|') !== headers.join('|')) throw new Error('TicketSLACycles has unexpected headers; no data was changed.');
+  sheet.setFrozenRows(1);
+  sheet.getRange('E:G').setNumberFormat('dd-mmm-yyyy hh:mm');
+  sheet.getRange('L:M').setNumberFormat('dd-mmm-yyyy hh:mm');
+  return { success: true, sheet: APP.SHEETS.SLA_CYCLES, created: sheet.getLastRow() <= 1 };
 }
