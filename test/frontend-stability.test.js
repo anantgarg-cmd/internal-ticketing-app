@@ -1,0 +1,11 @@
+const assert=require('assert'),fs=require('fs');
+const html=fs.readFileSync('Index.html','utf8'),code=html.match(/<script>([\s\S]*)<\/script>/)[1];
+new Function(code);
+assert.match(code,/function safeCallback\(/);assert.match(code,/if\(settled\)return false/);assert.match(code,/finally\{cleanup\(\);\}/);
+assert.match(code,/function renderPageError\(containerId,message,retryCallback\)/);
+assert.match(code,/function normalisePaginatedTicketResponse\(/);assert.match(code,/function normaliseTicketRow\(/);assert.match(code,/function normaliseDashboardResponse\(/);
+assert.match(code,/const allowed=\['registrationPage','raisePage','myPage','queuePage','numbersPage'\]/);
+assert.ok(!code.includes("t.slaStatus.replace(' ','-')"));assert.match(code,/Array\.isArray\(rows\)\?rows:\[\]/);
+assert.ok(html.indexOf('id="activityTicketList"')<html.indexOf('id="activityTicketPagination"'));
+assert.match(html,/shadowfax-ui-stability-v2/);assert.match(fs.readFileSync('Code.js','utf8'),/shadowfax-ui-stability-v2/);
+console.log('frontend stability contracts: 14 assertions passed');
