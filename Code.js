@@ -6,6 +6,7 @@
 const APP_RELEASE = 'registration-v2';
 const APP_COMMIT = '__APP_COMMIT__';
 let SPREADSHEET_INSTANCE_ = null;
+const DEPLOYMENT_AUTHORIZATION_MESSAGE = 'The application deployment has not been authorized by its deploying account. Please ask the application administrator to run authorizeApplication() once from the Apps Script editor.';
 const CACHE_KEYS_ = Object.freeze({
   SETTINGS: 'app:settings:v1',
   CATEGORIES: 'app:categories:v1',
@@ -16,6 +17,49 @@ function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle(APP.TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/**
+ * One-time deployment-owner authorization. Run manually from the Apps Script
+ * editor; this function is intentionally not part of web-app startup.
+ */
+function authorizeApplication() {
+  ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
+
+  const properties = PropertiesService.getScriptProperties();
+  const spreadsheetId = properties.getProperty('SPREADSHEET_ID');
+  if (!spreadsheetId) {
+    throw new Error('SPREADSHEET_ID is missing from Script Properties. Configure the application before authorizing it.');
+  }
+
+  SpreadsheetApp.openById(spreadsheetId).getName();
+  DriveApp.getRootFolder().getId();
+  UrlFetchApp.fetch('https://www.google.com/generate_204', { muteHttpExceptions: true });
+
+  const email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  if (!email.endsWith('@shadowfax.in')) {
+    throw new Error('Authorization must be completed by a @shadowfax.in deployment-owner account.');
+  }
+
+  return {
+    authorized: true,
+    spreadsheetAccessible: true,
+    driveAccessible: true,
+    externalRequestAccessible: true,
+    companyDomainValid: true,
+    timestamp: new Date().toISOString()
+  };
+}
+
+/** Returns non-sensitive authorization state for manual editor diagnostics. */
+function getAuthorizationDiagnostic() {
+  const info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+  const status = info.getAuthorizationStatus();
+  return {
+    authorizationStatus: status === ScriptApp.AuthorizationStatus.REQUIRED ? 'REQUIRED' : 'NOT_REQUIRED',
+    authorizationUrlPresent: Boolean(info.getAuthorizationUrl()),
+    timestamp: new Date().toISOString()
+  };
 }
 
 function getBootstrap() {
@@ -158,6 +202,7 @@ function submitTicket(form) {
   try {
     sendSlackAlert_(detail);
   } catch (err) {
+    if (String(err && err.message || '') === DEPLOYMENT_AUTHORIZATION_MESSAGE) throw err;
     console.error('Slack alert failed: ' + err.message);
   }
   logPerformance_('submitTicket', startedAt, { rows: 1 });
@@ -356,7 +401,12 @@ function setWebAppUrlFromEditor() {
 // -------------------- Authentication and access --------------------
 
 function getVerifiedCompanyEmail_() {
-  const email = lower_(Session.getActiveUser().getEmail());
+  let email;
+  try {
+    email = lower_(Session.getActiveUser().getEmail());
+  } catch (err) {
+    throwServiceAuthorizationError_(err);
+  }
   if (!email) {
     throw new Error('Your email could not be identified. Open this app using your company Google Workspace account. The deployment must be restricted to your organisation.');
   }
@@ -524,13 +574,23 @@ function saveAttachment_(blob, ticketId, raiserEmail) {
   if (!allowed.includes(contentType)) throw new Error('Allowed attachment types: PNG, JPG, PDF, TXT, JSON or ZIP.');
 
   const folderId = PropertiesService.getScriptProperties().getProperty('ATTACHMENT_FOLDER_ID');
-  if (!folderId) throw new Error('Attachment folder is not configured. Run setupSystem() again.');
-  const folder = DriveApp.getFolderById(folderId);
+  if (!folderId) throw new Error('Attachment storage is not configured. Please contact the application administrator.');
+  let folder;
+  try {
+    folder = DriveApp.getFolderById(folderId);
+  } catch (err) {
+    throwServiceAuthorizationError_(err);
+  }
   const original = cleanFileName_(blob.getName() || 'evidence');
   blob.setName(`${ticketId} - ${original}`);
-  const file = folder.createFile(blob);
-  file.setDescription(`Evidence for ${ticketId}. Uploaded by ${raiserEmail}.`);
-  try { file.addViewer(raiserEmail); } catch (err) { console.warn('Could not add raiser as viewer: ' + err.message); }
+  let file;
+  try {
+    file = folder.createFile(blob);
+    file.setDescription(`Evidence for ${ticketId}. Uploaded by ${raiserEmail}.`);
+    file.addViewer(raiserEmail);
+  } catch (err) {
+    throwServiceAuthorizationError_(err);
+  }
   return { id: file.getId(), name: file.getName(), url: file.getUrl() };
 }
 
@@ -563,12 +623,17 @@ function sendSlackAlert_(ticket) {
     appUrl ? `*Open app:* ${appUrl}` : ''
   ].filter(Boolean).join('\n');
 
-  const response = UrlFetchApp.fetch(webhook, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({ text }),
-    muteHttpExceptions: true
-  });
+  let response;
+  try {
+    response = UrlFetchApp.fetch(webhook, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ text }),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    throwServiceAuthorizationError_(err);
+  }
   if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) {
     throw new Error(`Slack returned ${response.getResponseCode()}: ${response.getContentText()}`);
   }
@@ -579,9 +644,21 @@ function sendSlackAlert_(ticket) {
 function getSpreadsheet_() {
   if (SPREADSHEET_INSTANCE_) return SPREADSHEET_INSTANCE_;
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  if (!id) throw new Error('System is not configured. Run setupSystem() first.');
-  SPREADSHEET_INSTANCE_ = SpreadsheetApp.openById(id);
+  if (!id) throw new Error('Spreadsheet access is not configured. Please contact the application administrator.');
+  try {
+    SPREADSHEET_INSTANCE_ = SpreadsheetApp.openById(id);
+  } catch (err) {
+    throwServiceAuthorizationError_(err);
+  }
   return SPREADSHEET_INSTANCE_;
+}
+
+/** Converts only platform authorization failures; business errors remain intact. */
+function throwServiceAuthorizationError_(err) {
+  const message = String(err && err.message ? err.message : err || '');
+  const isAuthorizationFailure = /authoriz|permission|insufficient|scope|access denied|not have access|credentials|oauth/i.test(message);
+  if (isAuthorizationFailure) throw new Error(DEPLOYMENT_AUTHORIZATION_MESSAGE);
+  throw err;
 }
 
 function getSettings_() {

@@ -156,3 +156,4 @@ jobs:
           echo "Commit: $GITHUB_SHA"
           echo "New Apps Script version: ${{ steps.version.outputs.number }}"
           echo 'Deployment update success: yes'
+          echo 'Runtime authorization may be required. Run authorizeApplication() once from the Apps Script editor using the deployment owner account.'
