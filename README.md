@@ -61,3 +61,14 @@ The exact `TicketSLACycles` columns are:
 6. Only if automatic recovery explicitly reports failure, run `upgradeSlaCycleSchema()` once in the Production Apps Script editor as the deployment owner, review its summary, and reload the web app.
 
 No one-time manual sheet creation is required. Existing OAuth authorization requirements are unchanged; `authorizeApplication()` is needed only when Google requires deployment-owner consent, as described above.
+
+## Client size and performance schema upgrade
+
+After deploying this release, an administrator must open the Apps Script editor and run
+`upgradeClientSizeAndPerformanceSchema()` exactly once in **DEV**, verify the returned summary and smoke-test ticket creation, then run the same function exactly once in **Production**. The function is idempotent and may safely be retried: it only creates missing derived/configuration sheets, appends missing headers, seeds missing client-size codes, and rebuilds `TicketIndex`. It never clears or rewrites Tickets, TicketEvents, Users, Categories, Settings, or TicketSLACycles, and it does not reprioritise historical tickets.
+
+`TicketIndex` is lightweight derived data used for lists, duplicate checks, and the SLA dashboard; ticket detail continues to read the authoritative `Tickets` sheet. Client-size priority is configured in `ClientSizePriority`, not in browser code. Configuration changes should be followed by running the upgrade/cache invalidation function or deploying a small admin maintenance function that calls `invalidateApplicationCaches_()`.
+
+### Capacity note
+
+The shorter locks, idempotency keys, caches, index, and pagination improve behaviour for bursts of approximately 30–40 users, but Google Sheets and Apps Script are not a database or a database-grade concurrency system. Apps Script execution quotas, service throttling, spreadsheet write serialization, cache eviction, and lock contention remain platform limits. Monitor execution logs and sheet growth; archive operational data deliberately if volumes exceed practical spreadsheet limits.

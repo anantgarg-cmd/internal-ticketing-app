@@ -13,27 +13,31 @@ const APP = Object.freeze({
     USERS: 'Users',
     EVENTS: 'TicketEvents',
     SETTINGS: 'Settings',
-    SLA_CYCLES: 'TicketSLACycles'
+    SLA_CYCLES: 'TicketSLACycles',
+    CLIENT_SIZE_PRIORITY: 'ClientSizePriority',
+    TICKET_INDEX: 'TicketIndex'
   }),
   ROLES: Object.freeze({ SALES: 'SALES', POC: 'POC', ADMIN: 'ADMIN' }),
   STATUS: Object.freeze({ RAISED: 'Raised', REOPENED: 'Reopened', INVESTIGATING: 'Investigating', RESOLVED: 'Resolved' }),
   HEADERS: Object.freeze({
     Tickets: [
-      'Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_Mode','Client_ID','Client_Name','Client_Type',
+      'Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_Mode','Client_ID','Client_Name','Client_Type','Client_Size',
       'Category_ID','Category_Name','Email_Subject','Normalized_Subject','Issue_Description','Priority','SLA_Hours',
       'SLA_Due_At','Status','Picked_Up_By','Picked_Up_At','Investigating_At','Resolution_Note','Root_Cause',
       'Resolved_By','Resolved_At','SLA_Result','Duplicate_Of','Duplicate_Override','Dynamic_Fields_JSON',
-      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By'
+      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Priority_Source','Submission_Request_ID'
     ],
     Clients: ['Client_ID','Client_Name','Client_Type','Active'],
     Categories: ['Category_ID','Client_Type','Category_Name','Priority','SLA_Hours','Fields_JSON','Required_Fields_JSON','Active'],
     Users: ['Email','Name','Role','Active'],
-    TicketEvents: ['Event_ID','Ticket_ID','Event_Type','Old_Value','New_Value','Performed_By','Created_At','Note'],
+    TicketEvents: ['Event_ID','Ticket_ID','Event_Type','Old_Value','New_Value','Performed_By','Created_At','Note','Request_ID'],
     Settings: ['Key','Value','Description'],
     TicketSLACycles: [
       'SLA_Cycle_ID','Ticket_ID','Cycle_Number','Cycle_Type','Started_At','Due_At','Ended_At','SLA_Result',
       'Started_By','Ended_By','Reopen_Reason','Created_At','Updated_At'
-    ]
+    ],
+    ClientSizePriority: ['Client_Size_Code','Display_Label','ADL_Description','Min_ADL','Max_ADL','Priority','Active','Sort_Order'],
+    TicketIndex: ['Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_ID','Client_Name','Client_Type','Client_Size','Client_Key','Category_ID','Category_Name','Email_Subject','Normalized_Subject','Priority','Priority_Source','SLA_Due_At','Status','Resolved_At','SLA_Result','Current_SLA_Cycle','Submission_Request_ID','Updated_At']
   })
 });
 
@@ -51,6 +55,7 @@ function setupSystem() {
 
   seedSettings_(ss);
   seedCategories_(ss);
+  seedClientSizePriority_(ss);
   seedAdminUser_(ss);
   formatSheets_(ss);
 
@@ -113,7 +118,7 @@ function seedAdminUser_(ss) {
   if (sheet.getLastRow() > 1) return;
   const email = (Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || '').toLowerCase();
   if (!email) throw new Error('Could not read your Google Workspace email. Run setup from your company account.');
-  sheet.appendRow([email, 'System Admin', APP.ROLES.ADMIN, true]);
+  sheet.getRange(sheet.getLastRow() + 1, 1, 1, 4).setValues([[email, 'System Admin', APP.ROLES.ADMIN, true]]);
 }
 
 function seedCategories_(ss) {
@@ -150,6 +155,25 @@ function seedCategories_(ss) {
 
 function category_(id, clientType, name, priority, slaHours, fields, required) {
   return [id, clientType, name, priority, slaHours, JSON.stringify(fields), JSON.stringify(required), true];
+}
+
+function clientSizePrioritySeedRows_() {
+  return [
+    ['GOLD_PLATINUM','Gold / Platinum','ADL 300 and above',300,'','HIGH',true,1],
+    ['MEDIUM_SIZED','Medium-sized','ADL between 50 and 299',50,299,'MEDIUM',true,2],
+    ['SMALL_SIZED','Small-sized','ADL below 50',0,49,'LOW',true,3]
+  ];
+}
+
+function seedClientSizePriority_(ss) {
+  const sheet = ss.getSheetByName(APP.SHEETS.CLIENT_SIZE_PRIORITY);
+  const headers = APP.HEADERS.ClientSizePriority;
+  const existing = sheet.getLastRow() < 2 ? [] : sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+  const codeColumn = headers.indexOf('Client_Size_Code');
+  const codes = existing.map(row => String(row[codeColumn] || ''));
+  const missing = clientSizePrioritySeedRows_().filter(row => codes.indexOf(row[0]) < 0);
+  if (missing.length) sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, headers.length).setValues(missing);
+  return missing.map(row => row[0]);
 }
 
 function formatSheets_(ss) {
@@ -237,6 +261,29 @@ function upgradeSlaCycleSchema() {
 
 /** Complete additive upgrade entry point retained for deployment runbooks. */
 function upgradeClientSizeAndPerformanceSchema() {
+  const user = requireRole_([APP.ROLES.ADMIN]);
+  const ss = getSpreadsheet_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  const createdSheets = [], columnsAdded = {};
+  try {
+    [APP.SHEETS.CLIENT_SIZE_PRIORITY, APP.SHEETS.TICKET_INDEX].forEach(name => {
+      if (!ss.getSheetByName(name)) createdSheets.push(name);
+      ensureSheet_(ss, name, APP.HEADERS[name]);
+    });
+    [[APP.SHEETS.TICKETS, ['Client_Size','Priority_Source','Submission_Request_ID']], [APP.SHEETS.EVENTS, ['Request_ID']]].forEach(spec => {
+      const sheet = ss.getSheetByName(spec[0]);
+      const current = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(String);
+      const missing = spec[1].filter(header => current.indexOf(header) < 0);
+      if (missing.length) sheet.getRange(1, current.length + 1, 1, missing.length).setValues([missing]);
+      columnsAdded[spec[0]] = missing;
+    });
+  } finally { lock.releaseLock(); }
+  const seededClientSizes = seedClientSizePriority_(ss);
   const slaCycles = ensureTicketSlaCyclesSchema_();
-  return { success: true, slaCycles, message: 'Additive schema validation completed; no source sheets or historical rows were cleared.' };
+  const index = rebuildTicketIndex_(true);
+  invalidateApplicationCaches_();
+  formatSheets_(ss);
+  return { success: true, runByRole: user.role, createdSheets, columnsAdded, seededClientSizes, indexedTickets: index.indexed, slaCycles,
+    message: 'Additive upgrade complete. Source and historical rows were not cleared, moved, or reprioritised.' };
 }
