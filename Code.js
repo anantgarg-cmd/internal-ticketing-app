@@ -785,6 +785,13 @@ function cleanText_(value, maxLength) {
   return String(value == null ? '' : value).trim().slice(0, maxLength || 5000);
 }
 
+// Range.setValues treats a leading formula marker as executable content. Keep
+// user-authored text as text while retaining the visible value in Sheets.
+function safeSheetText_(value, maxLength) {
+  const text = cleanText_(value, maxLength);
+  return /^[=+\-@]/.test(text) ? "'" + text : text;
+}
+
 function cleanFileName_(name) {
   return String(name).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 150);
 }
@@ -916,14 +923,14 @@ function paginate_(rows, requestedPage, requestedSize) { const pageSize=Math.min
 
 function getMyTickets(options) {
   const startedAt=Date.now(),user=requireUser_(),settings=getSettings_(),cutoff=new Date(Date.now()-number_(settings.RESOLVED_VISIBILITY_DAYS,10)*86400000);
-  const all=getSheetObjects_(APP.SHEETS.TICKET_INDEX), filtered=all.filter(t=>lower_(t.Raiser_Email)===user.email).filter(t=>String(t.Status)!==APP.STATUS.RESOLVED||toDate_(t.Resolved_At)>=cutoff).sort((a,b)=>toDate_(b.Created_At)-toDate_(a.Created_At));
+  const all=getSheetObjects_(APP.SHEETS.TICKETS), filtered=all.filter(t=>lower_(t.Raiser_Email)===user.email).filter(t=>String(t.Status)!==APP.STATUS.RESOLVED||toDate_(t.Resolved_At)>=cutoff).sort((a,b)=>toDate_(b.Created_At)-toDate_(a.Created_At));
   const page=paginate_(filtered,options&&options.page,options&&options.pageSize); page.rows=page.rows.map(serializeQueueTicket_); logPerformance_('getMyTickets',startedAt,{rows:all.length}); return page;
 }
 
 function getQueueTickets(filters) {
   const startedAt=Date.now(); requireRole_([APP.ROLES.POC,APP.ROLES.ADMIN]); filters=filters||{};
   const search=lower_(filters.search),status=filters.status===undefined?'OPEN':String(filters.status),priority=String(filters.priority||''),category=String(filters.category||''),clientSize=String(filters.clientSize||''),sla=String(filters.sla||'');
-  const all=getSheetObjects_(APP.SHEETS.TICKET_INDEX), filtered=all.filter(t=>{const x=serializeQueueTicket_(t);return(!search||[x.ticketId,x.clientName,x.emailSubject,x.raiserEmail].join(' ').toLowerCase().includes(search))&&(status==='OPEN'?['Raised','Reopened','Investigating'].includes(x.status):(!status||x.status===status))&&(!priority||x.priority===priority)&&(!category||x.categoryName===category)&&(!clientSize||x.clientSize===clientSize)&&(!sla||x.slaStatus===sla);}).sort(queueSort_);
+  const all=getSheetObjects_(APP.SHEETS.TICKETS), filtered=all.filter(t=>{const x=serializeQueueTicket_(t);return(!search||[x.ticketId,x.clientName,x.emailSubject,x.raiserEmail].join(' ').toLowerCase().includes(search))&&(status==='OPEN'?['Raised','Reopened','Investigating'].includes(x.status):(!status||x.status===status))&&(!priority||x.priority===priority)&&(!category||x.categoryName===category)&&(!clientSize||x.clientSize===clientSize)&&(!sla||x.slaStatus===sla);}).sort(queueSort_);
   const page=paginate_(filtered,filters.page,filters.pageSize); page.rows=page.rows.map(serializeQueueTicket_); page.categories=getActiveCategories_().map(c=>c.name).filter((v,i,a)=>a.indexOf(v)===i).sort(); page.clientSizes=getActiveClientSizePriorities_(); logPerformance_('getQueueTickets',startedAt,{rows:all.length}); return page;
 }
 
@@ -965,15 +972,20 @@ function submitTicket(form) {
   const category=getCategoryById_(form.categoryId);if(!category)throw new Error('The selected category is no longer active. Refresh the page and choose an active category.');const client=resolveClient_(form,category.Client_Type);validateTicketForm_(form,category,client);const resolution=resolveTicketPriority_(client.type,form.clientSize,category);
   let ticketId,lock=LockService.getScriptLock(),lockStarted=Date.now();lock.waitLock(10000);try{ticketId=nextTicketId_();}finally{lock.releaseLock();}const lockWaitMs=Date.now()-lockStarted;
   let attachment={id:'',name:'',url:''};try{attachment=saveAttachment_(form.attachment,ticketId,user.email);}catch(err){throw err;}
-  const createdAt=new Date(),slaHours=resolution.slaHours,slaDueAt=calculateWorkingSlaDueAt_(createdAt,slaHours),subject=cleanText_(form.emailSubject,300);
-  const ticket={Ticket_ID:ticketId,Created_At:createdAt,Raiser_Email:user.email,Raiser_Name:user.name,Client_Mode:client.mode,Client_ID:client.id,Client_Name:client.name,Client_Type:client.type,Client_Size:resolution.clientSize,Category_ID:category.Category_ID,Category_Name:category.Category_Name,Email_Subject:subject,Normalized_Subject:normalizeSubject_(subject),Issue_Description:cleanText_(form.issueDescription,5000),Priority:resolution.priority,Priority_Source:resolution.prioritySource,SLA_Hours:slaHours,SLA_Source:resolution.slaSource,SLA_Due_At:slaDueAt,Status:APP.STATUS.RAISED,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',SLA_Result:'ON TRACK',Duplicate_Of:cleanText_(form.duplicateIds||'',500),Duplicate_Override:String(form.duplicateOverride||'').toLowerCase()==='true',Dynamic_Fields_JSON:JSON.stringify(extractDynamicFields_(form,category)),Attachment_File_ID:attachment.id,Attachment_File_Name:attachment.name,Attachment_URL:attachment.url,Updated_At:createdAt,Updated_By:user.email,Submission_Request_ID:requestId,Current_SLA_Cycle:1};
-  let ticketCommitted=false;lock=LockService.getScriptLock();lockStarted=Date.now();lock.waitLock(10000);try{existing=findTicketBySubmissionRequestId_(requestId);if(existing){if(attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}return getTicketDetail(existing.object.Ticket_ID);}requireTicketSlaCyclesSchemaForWrite_(true);appendObject_(APP.SHEETS.TICKETS,ticket);ticketCommitted=true;appendSlaCycle_({Ticket_ID:ticketId,Cycle_Number:1,Cycle_Type:'INITIAL',Started_At:createdAt,Due_At:slaDueAt,SLA_Result:'OPEN',Started_By:user.email,Created_At:createdAt,Updated_At:createdAt});appendEvent_(ticketId,'TICKET_RAISED','',APP.STATUS.RAISED,user.email,ticket.Duplicate_Override?'Raised despite duplicate warning.':'',createdAt,requestId);upsertTicketIndex_(ticket);invalidateTicketCaches_();}catch(err){if(!ticketCommitted&&attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}throw err;}finally{lock.releaseLock();}
+  const createdAt=new Date(),slaHours=resolution.slaHours,slaDueAt=calculateWorkingSlaDueAt_(createdAt,slaHours),subject=safeSheetText_(form.emailSubject,300);
+  const ticket={Ticket_ID:ticketId,Created_At:createdAt,Raiser_Email:user.email,Raiser_Name:user.name,Client_Mode:client.mode,Client_ID:safeSheetText_(client.id,20),Client_Name:safeSheetText_(client.name,200),Client_Type:client.type,Client_Size:resolution.clientSize,Category_ID:category.Category_ID,Category_Name:category.Category_Name,Email_Subject:subject,Normalized_Subject:normalizeSubject_(subject),Issue_Description:safeSheetText_(form.issueDescription,5000),Priority:resolution.priority,Priority_Source:resolution.prioritySource,SLA_Hours:slaHours,SLA_Source:resolution.slaSource,SLA_Due_At:slaDueAt,Status:APP.STATUS.RAISED,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',SLA_Result:'ON TRACK',Duplicate_Of:safeSheetText_(form.duplicateIds||'',500),Duplicate_Override:String(form.duplicateOverride||'').toLowerCase()==='true',Dynamic_Fields_JSON:safeSheetText_(JSON.stringify(extractDynamicFields_(form,category)),50000),Attachment_File_ID:attachment.id,Attachment_File_Name:attachment.name,Attachment_URL:attachment.url,Updated_At:createdAt,Updated_By:user.email,Submission_Request_ID:requestId,Current_SLA_Cycle:1};
+  let ticketCommitted=false,cleanupAttachment=false,commitError=null,duplicateTicketId='';lock=LockService.getScriptLock();lockStarted=Date.now();lock.waitLock(10000);try{existing=findTicketBySubmissionRequestId_(requestId);if(existing){cleanupAttachment=Boolean(attachment.id);duplicateTicketId=String(existing.object.Ticket_ID);}else{requireTicketSlaCyclesSchemaForWrite_(true);appendObject_(APP.SHEETS.TICKETS,ticket);ticketCommitted=true;appendSlaCycle_({Ticket_ID:ticketId,Cycle_Number:1,Cycle_Type:'INITIAL',Started_At:createdAt,Due_At:slaDueAt,SLA_Result:'OPEN',Started_By:user.email,Created_At:createdAt,Updated_At:createdAt});appendEvent_(ticketId,'TICKET_RAISED','',APP.STATUS.RAISED,user.email,ticket.Duplicate_Override?'Raised despite duplicate warning.':'',createdAt,requestId);upsertTicketIndex_(ticket);invalidateTicketCaches_();}}catch(err){commitError=err;cleanupAttachment=!ticketCommitted&&Boolean(attachment.id);}finally{lock.releaseLock();}
+  // Drive calls are deliberately outside ScriptLock. A file attached to an
+  // authoritative Tickets row is never deleted, even if a derived write fails.
+  if(cleanupAttachment)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){console.error('Uncommitted attachment cleanup failed.');}
+  if(commitError)throw commitError;
+  if(duplicateTicketId)return getTicketDetail(duplicateTicketId);
   const detail=getTicketDetail(ticketId);try{sendSlackAlert_(detail);}catch(err){console.error('Slack alert failed.');}logPerformance_('submitTicket',startedAt,{rows:1,lockWaitMs:lockWaitMs+Date.now()-lockStarted});return detail;
 }
 
 function updateTicketStatus(payload) {
   const startedAt=Date.now(),user=requireRole_([APP.ROLES.POC,APP.ROLES.ADMIN]);if(!payload||!payload.ticketId||!payload.newStatus)throw new Error('Ticket and new status are required.');const requestId=cleanText_(payload.actionRequestId,100);if(!requestId)throw new Error('Action_Request_ID is required.');
-  let prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);const lock=LockService.getScriptLock(),wait=Date.now();lock.waitLock(10000);try{prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);const found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',payload.ticketId);if(!found)throw new Error('Ticket not found.');const ticket=found.object,oldStatus=String(ticket.Status),newStatus=String(payload.newStatus),allowed={Raised:'Investigating',Reopened:'Investigating',Investigating:'Resolved'};if(allowed[oldStatus]!==newStatus)throw new Error(`Transition from ${oldStatus} to ${newStatus} is not allowed.`);const now=new Date(),changes={Status:newStatus,Updated_At:now,Updated_By:user.email};if(newStatus===APP.STATUS.INVESTIGATING){changes.Picked_Up_By=user.email;changes.Picked_Up_At=now;changes.Investigating_At=now;}if(newStatus===APP.STATUS.RESOLVED){changes.Resolution_Note=cleanText_(payload.resolutionNote,5000);changes.Root_Cause=cleanText_(payload.rootCause,200);if(!changes.Resolution_Note||!changes.Root_Cause)throw new Error('Resolution note and root cause are mandatory.');changes.Resolved_By=user.email;changes.Resolved_At=now;changes.SLA_Result=now<=toDate_(ticket.SLA_Due_At)?'MET':'BREACHED';ensureOpenInitialCycle_(ticket);closeOpenSlaCycle_(payload.ticketId,now,user.email,changes.SLA_Result);}updateObjectRow_(APP.SHEETS.TICKETS,found.rowNumber,changes);const updated=Object.assign({},ticket,changes);appendEvent_(payload.ticketId,'STATUS_CHANGED',oldStatus,newStatus,user.email,newStatus===APP.STATUS.RESOLVED?`${changes.Root_Cause}: ${changes.Resolution_Note}`:'',now,requestId);upsertTicketIndex_(updated);invalidateTicketCaches_();}finally{lock.releaseLock();}const result=getTicketDetail(payload.ticketId);logPerformance_('updateTicketStatus',startedAt,{rows:1,lockWaitMs:Date.now()-wait});return result;
+  let prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);const lock=LockService.getScriptLock(),wait=Date.now();lock.waitLock(10000);try{prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);const found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',payload.ticketId);if(!found)throw new Error('Ticket not found.');const ticket=found.object,oldStatus=String(ticket.Status),newStatus=String(payload.newStatus),allowed={Raised:'Investigating',Reopened:'Investigating',Investigating:'Resolved'};if(allowed[oldStatus]!==newStatus)throw new Error(`Transition from ${oldStatus} to ${newStatus} is not allowed.`);const now=new Date(),changes={Status:newStatus,Updated_At:now,Updated_By:user.email};if(newStatus===APP.STATUS.INVESTIGATING){changes.Picked_Up_By=user.email;changes.Picked_Up_At=now;changes.Investigating_At=now;}if(newStatus===APP.STATUS.RESOLVED){changes.Resolution_Note=safeSheetText_(payload.resolutionNote,5000);changes.Root_Cause=safeSheetText_(payload.rootCause,200);if(!changes.Resolution_Note||!changes.Root_Cause)throw new Error('Resolution note and root cause are mandatory.');const allowedRootCauses=String(getSettings_().ROOT_CAUSES||'').split('|').map(v=>v.trim()).filter(Boolean);if(allowedRootCauses.indexOf(cleanText_(payload.rootCause,200))<0)throw new Error('Select a valid root cause from the configured list.');changes.Resolved_By=user.email;changes.Resolved_At=now;changes.SLA_Result=now<=toDate_(ticket.SLA_Due_At)?'MET':'BREACHED';ensureOpenInitialCycle_(ticket);closeOpenSlaCycle_(payload.ticketId,now,user.email,changes.SLA_Result);}updateObjectRow_(APP.SHEETS.TICKETS,found.rowNumber,changes);const updated=Object.assign({},ticket,changes);appendEvent_(payload.ticketId,'STATUS_CHANGED',oldStatus,newStatus,user.email,newStatus===APP.STATUS.RESOLVED?`${changes.Root_Cause}: ${changes.Resolution_Note}`:'',now,requestId);upsertTicketIndex_(updated);invalidateTicketCaches_();}finally{lock.releaseLock();}const result=getTicketDetail(payload.ticketId);logPerformance_('updateTicketStatus',startedAt,{rows:1,lockWaitMs:Date.now()-wait});return result;
 }
 
 function reopenTicket(payload) {
@@ -993,17 +1005,57 @@ function getCategoryById_(id) {
   return category ? {Category_ID:category.id,Client_Type:category.clientType,Category_Name:category.name,Priority:category.priority,SLA_Hours:category.slaHours,Fields_JSON:JSON.stringify(category.fields),Required_Fields_JSON:JSON.stringify(category.requiredFields),Active:true} : null;
 }
 
+function duplicateValueCount_(rows, key) {
+  const seen={},duplicates={};
+  rows.forEach(row=>{const value=String(row[key]||'').trim();if(!value)return;seen[value]=(seen[value]||0)+1;if(seen[value]===2)duplicates[value]=true;});
+  return Object.keys(duplicates).length;
+}
+
+/** Pure integrity calculation used by the editor diagnostic and local tests. */
+function diagnoseTicketIntegrityRows_(tickets,indexRows,cycles,events,slackRows) {
+  const ticketIds={},indexIds={},cycleGroups={};
+  tickets.forEach(t=>{ticketIds[String(t.Ticket_ID)]=t;});
+  indexRows.forEach(t=>{indexIds[String(t.Ticket_ID)]=t;});
+  cycles.forEach(c=>{const id=String(c.Ticket_ID);(cycleGroups[id]=cycleGroups[id]||[]).push(c);});
+  const counts={
+    ticketsWithoutIndex:0,indexRowsWithoutTicket:0,ticketsWithoutInitialSlaCycle:0,ticketsWithMultipleOpenSlaCycles:0,
+    duplicateSubmissionRequestIds:duplicateValueCount_(tickets,'Submission_Request_ID'),duplicateTicketIds:duplicateValueCount_(tickets,'Ticket_ID'),
+    duplicateEventRequestIds:duplicateValueCount_(events,'Request_ID'),duplicateSlackDedupeKeys:duplicateValueCount_(slackRows,'Dedupe_Key'),
+    resolvedTicketsWithOpenSlaCycle:0,openTicketsWithoutOpenSlaCycle:0
+  };
+  tickets.forEach(ticket=>{
+    const id=String(ticket.Ticket_ID),ticketCycles=cycleGroups[id]||[],open=ticketCycles.filter(c=>String(c.SLA_Result)==='OPEN');
+    if(!indexIds[id])counts.ticketsWithoutIndex++;
+    if(!ticketCycles.some(c=>String(c.Cycle_Type)==='INITIAL'))counts.ticketsWithoutInitialSlaCycle++;
+    if(open.length>1)counts.ticketsWithMultipleOpenSlaCycles++;
+    if(String(ticket.Status)===APP.STATUS.RESOLVED&&open.length)counts.resolvedTicketsWithOpenSlaCycle++;
+    if(String(ticket.Status)!==APP.STATUS.RESOLVED&&!open.length)counts.openTicketsWithoutOpenSlaCycle++;
+  });
+  indexRows.forEach(row=>{if(!ticketIds[String(row.Ticket_ID)])counts.indexRowsWithoutTicket++;});
+  return counts;
+}
+
+/** ADMIN-only, read-only diagnostic. It returns counts, never row/user content. */
+function runTicketIntegrityDiagnostic() {
+  requireRole_([APP.ROLES.ADMIN]);
+  return diagnoseTicketIntegrityRows_(
+    getSheetObjects_(APP.SHEETS.TICKETS),getSheetObjects_(APP.SHEETS.TICKET_INDEX),getSheetObjects_(APP.SHEETS.SLA_CYCLES),
+    getSheetObjects_(APP.SHEETS.EVENTS),getSheetObjects_(APP.SHEETS.SLACK_NOTIFICATIONS));
+}
+
 /** Safe, read-only administrator diagnostic. It never returns row contents or identifiers. */
 function runEndToEndHealthCheck() {
   requireRole_([APP.ROLES.ADMIN]);
   const ss=getSpreadsheet_(),props=PropertiesService.getScriptProperties(),warnings=[],missingHeaders={},present={};
+  const duplicateHeaders={};
   Object.keys(APP.HEADERS).forEach(name=>{
     const sheet=ss.getSheetByName(name);present[name]=Boolean(sheet);
     if(!sheet){missingHeaders[name]=APP.HEADERS[name].slice();return;}
     const headers=sheet.getLastColumn()?sheet.getRange(1,1,1,sheet.getLastColumn()).getDisplayValues()[0].map(String):[];
     const missing=APP.HEADERS[name].filter(header=>headers.indexOf(header)<0);if(missing.length)missingHeaders[name]=missing;
+    const duplicates=headers.filter((header,index)=>header&&headers.indexOf(header)!==index).filter((header,index,array)=>array.indexOf(header)===index);if(duplicates.length)duplicateHeaders[name]=duplicates;
   });
-  const categories=getActiveCategories_(),sizes=getActiveClientSizePriorities_(),settings=getSettings_();
+  const categories=present[APP.SHEETS.CATEGORIES]&&!missingHeaders[APP.SHEETS.CATEGORIES]?getActiveCategories_():[],sizes=present[APP.SHEETS.CLIENT_SIZE_PRIORITY]&&!missingHeaders[APP.SHEETS.CLIENT_SIZE_PRIORITY]?getActiveClientSizePriorities_():[],settings=present[APP.SHEETS.SETTINGS]&&!missingHeaders[APP.SHEETS.SETTINGS]?getSettings_():{};
   const tickets=safeDataRowCount_(ss.getSheetByName(APP.SHEETS.TICKETS)),index=safeDataRowCount_(ss.getSheetByName(APP.SHEETS.TICKET_INDEX));
   const triggers=ScriptApp.getProjectTriggers(),dispatcherCount=triggers.filter(t=>t.getHandlerFunction()==='dispatchSlackNotifications').length,monitorCount=triggers.filter(t=>t.getHandlerFunction()==='monitorSlackAlerts').length;
   const requiredSettings=['COMPANY_DOMAIN','MAX_ATTACHMENT_MB','DUPLICATE_WINDOW_DAYS','DUPLICATE_SIMILARITY_THRESHOLD','RESOLVED_VISIBILITY_DAYS','DASHBOARD_WINDOW_DAYS','ROOT_CAUSES'];
@@ -1013,8 +1065,12 @@ function runEndToEndHealthCheck() {
   if(dispatcherCount!==1)warnings.push('Slack dispatcher trigger count must be one.');if(monitorCount!==1)warnings.push('Slack monitor trigger count must be one.');
   if(missingSettings.length)warnings.push('Required Settings keys are missing.');if(auth==='REQUIRED')warnings.push('Deployment-owner OAuth authorization is required.');
   let webhook=false;try{webhook=Boolean(getSlackWebhookUrl_());}catch(ignore){}
-  const result={appRelease:APP_RELEASE,appCommit:APP_COMMIT==='__APP_COMMIT__'?'':APP_COMMIT,currentSchemaVersion:CURRENT_SCHEMA_VERSION,schemaPropertyVersion:Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_)||0),requiredSheetsPresent:present,missingHeadersBySheet:missingHeaders,active360CategoryCount:categories.filter(c=>c.clientType==='360').length,activeRegularCategoryCount:categories.filter(c=>c.clientType==='Regular').length,activeClientSizeCount:sizes.length,clientSizes:sizes.map(s=>({code:s.code,priority:s.priority,slaHours:s.slaHours})),ticketsRowCount:tickets,ticketIndexRowCount:index,ticketIndexConsistent:tickets===index,slackNotificationsSheetReady:Boolean(present[APP.SHEETS.SLACK_NOTIFICATIONS]&&!missingHeaders[APP.SHEETS.SLACK_NOTIFICATIONS]),slackWebhookConfigured:webhook,dispatcherTriggerCount:dispatcherCount,monitorTriggerCount:monitorCount,requiredSettingsPresent:missingSettings.length===0,missingSettingsKeys:missingSettings,oauthAuthorizationStatus:auth,timezone:APP.TZ,workingHours:{days:'Monday-Friday',start:'11:30',end:'19:30',overnight:false},warnings:warnings};
-  result.ready=Object.keys(present).every(k=>present[k])&&Object.keys(missingHeaders).length===0&&result.schemaPropertyVersion===CURRENT_SCHEMA_VERSION&&result.ticketIndexConsistent&&result.requiredSettingsPresent&&auth==='NOT_REQUIRED'&&result.slackNotificationsSheetReady&&webhook&&dispatcherCount===1&&monitorCount===1;
+  const emptyIntegrityCounts=diagnoseTicketIntegrityRows_([],[],[],[],[]),integritySheets=[APP.SHEETS.TICKETS,APP.SHEETS.TICKET_INDEX,APP.SHEETS.SLA_CYCLES,APP.SHEETS.EVENTS,APP.SHEETS.SLACK_NOTIFICATIONS],integrityDiagnosticAvailable=integritySheets.every(name=>present[name]&&!missingHeaders[name]);
+  const integrityIssueCounts=integrityDiagnosticAvailable?diagnoseTicketIntegrityRows_(getSheetObjects_(APP.SHEETS.TICKETS),getSheetObjects_(APP.SHEETS.TICKET_INDEX),getSheetObjects_(APP.SHEETS.SLA_CYCLES),getSheetObjects_(APP.SHEETS.EVENTS),getSheetObjects_(APP.SHEETS.SLACK_NOTIFICATIONS)):emptyIntegrityCounts;
+  if(!integrityDiagnosticAvailable)warnings.push('Integrity counts are unavailable until required sheets and headers are repaired.');
+  if(Object.keys(integrityIssueCounts).some(key=>integrityIssueCounts[key]>0))warnings.push('Ticket integrity issues were detected; run runTicketIntegrityDiagnostic() for count-only details.');
+  const result={appRelease:APP_RELEASE,appCommit:APP_COMMIT==='__APP_COMMIT__'?'':APP_COMMIT,currentSchemaVersion:CURRENT_SCHEMA_VERSION,schemaPropertyVersion:Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_)||0),requiredSheetsPresent:present,missingSheets:Object.keys(present).filter(name=>!present[name]),missingHeadersBySheet:missingHeaders,duplicateHeadersBySheet:duplicateHeaders,active360CategoryCount:categories.filter(c=>c.clientType==='360').length,activeRegularCategoryCount:categories.filter(c=>c.clientType==='Regular').length,activeClientSizeCount:sizes.length,clientSizes:sizes.map(s=>({code:s.code,priority:s.priority,slaHours:s.slaHours})),ticketsRowCount:tickets,ticketIndexRowCount:index,ticketIndexConsistent:tickets===index,integrityDiagnosticAvailable:integrityDiagnosticAvailable,integrityIssueCounts:integrityIssueCounts,slackNotificationsSheetReady:Boolean(present[APP.SHEETS.SLACK_NOTIFICATIONS]&&!missingHeaders[APP.SHEETS.SLACK_NOTIFICATIONS]),slackWebhookConfigured:webhook,dispatcherTriggerCount:dispatcherCount,monitorTriggerCount:monitorCount,requiredSettingsPresent:missingSettings.length===0,missingSettingsKeys:missingSettings,oauthAuthorizationStatus:auth,timezone:APP.TZ,workingHours:{days:'Monday-Friday',start:'11:30',end:'19:30',overnight:false},warnings:warnings};
+  result.ready=Object.keys(present).every(k=>present[k])&&Object.keys(missingHeaders).length===0&&Object.keys(duplicateHeaders).length===0&&integrityDiagnosticAvailable&&Object.keys(integrityIssueCounts).every(key=>integrityIssueCounts[key]===0)&&result.schemaPropertyVersion===CURRENT_SCHEMA_VERSION&&result.ticketIndexConsistent&&result.requiredSettingsPresent&&auth==='NOT_REQUIRED'&&result.slackNotificationsSheetReady&&webhook&&dispatcherCount===1&&monitorCount===1;
   return result;
 }
 
