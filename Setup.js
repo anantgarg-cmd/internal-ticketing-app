@@ -231,11 +231,19 @@ function newSchemaSummary_() {
 /** Create a missing sheet/header and append absent columns without moving data. */
 function ensureSheetSchema_(spreadsheet, sheetName, expectedHeaders, summary) {
   let sheet = spreadsheet.getSheetByName(sheetName);
+  let created = false;
   if (!sheet) {
     sheet = spreadsheet.insertSheet(sheetName);
+    created = true;
     if (summary) summary.sheetsCreated.push(sheetName);
   }
   const added = appendMissingColumns_(sheet, expectedHeaders);
+  if (created || added.length) {
+    sheet.setFrozenRows(1);
+    const start = created ? 1 : Math.max(1, sheet.getLastColumn() - added.length + 1);
+    const count = created ? sheet.getLastColumn() : added.length;
+    if (count) sheet.getRange(1,start,1,count).setFontWeight('bold').setBackground('#17324d').setFontColor('#ffffff');
+  }
   if (summary && added.length) summary.columnsAdded[sheetName] = (summary.columnsAdded[sheetName] || []).concat(added);
   return sheet;
 }
@@ -296,13 +304,13 @@ function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
   if (fromVersion < 4 && toVersion >= 4) ensure([APP.SHEETS.TICKET_INDEX, APP.SHEETS.TICKETS, APP.SHEETS.EVENTS]);
   // Migration 5 deliberately rechecks the complete contract. This also makes
   // repair safe where a tab/column was manually created during an older release.
-  if (toVersion >= 5) { ensure(Object.values(APP.SHEETS)); seedMissingConfigurationRows_(ss, report); formatSheets_(ss); }
+  if (toVersion >= 5) { ensure(Object.values(APP.SHEETS)); seedMissingConfigurationRows_(ss, report); }
   // Version 6 adds SLA source-of-truth columns. Additive header repair and
   // absent-row-only seeding preserve every administrator-edited value.
   if (toVersion >= 6) { ensure([APP.SHEETS.TICKETS, APP.SHEETS.CLIENT_SIZE_PRIORITY]); seedMissingConfigurationRows_(ss, report); }
   // Version 7 adds only operational Slack queue/configuration data. Existing
   // columns and rows remain in place and missing fields are appended.
-  if (toVersion >= 7) { ensure([APP.SHEETS.SLACK_NOTIFICATIONS, APP.SHEETS.SETTINGS]); seedMissingConfigurationRows_(ss, report); formatSheets_(ss); }
+  if (toVersion >= 7) { ensure([APP.SHEETS.SLACK_NOTIFICATIONS, APP.SHEETS.SETTINGS]); seedMissingConfigurationRows_(ss, report); }
   const indexResult = backfillTicketIndexIfNeeded_(ss);
   report.ticketIndexRowsCreated += indexResult.created;
   if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');
@@ -396,8 +404,9 @@ function validateApplicationSchema() {
 function safeDataRowCount_(sheet) { return sheet ? Math.max(0, sheet.getLastRow() - 1) : 0; }
 
 function repairApplicationSchema() {
-  const ss = getSpreadsheet_(), props = PropertiesService.getScriptProperties(), lock = LockService.getScriptLock(), wait = Date.now(), summary = newSchemaSummary_();
+  const ss = getSpreadsheet_(), props = PropertiesService.getScriptProperties(), lock = LockService.getScriptLock(), startedAt = Date.now(), waitStarted = Date.now(), summary = newSchemaSummary_();
   lock.waitLock(10000);
+  const lockWaitMs = Date.now() - waitStarted;
   try {
     const from = Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_) || 0);
     const result = runSchemaMigrations_(from, CURRENT_SCHEMA_VERSION, ss, summary);
@@ -405,7 +414,7 @@ function repairApplicationSchema() {
     if (!validation.ready || !result.indexComplete) throw new Error('Schema or TicketIndex validation is not complete. Retry after the continuation finishes.');
     props.setProperty(APP_SCHEMA_VERSION_PROPERTY_, String(CURRENT_SCHEMA_VERSION));
     invalidateSchemaCaches_();
-    console.log(JSON.stringify({ functionName: 'repairApplicationSchema', durationMs: Date.now() - wait, lockWaitMs: Date.now() - wait }));
+    console.log(JSON.stringify({ functionName: 'repairApplicationSchema', durationMs: Date.now() - startedAt, lockWaitMs: lockWaitMs }));
     return summary;
   } catch (error) { console.error('Administrator schema repair failed: ' + String(error && error.message || error)); summary.success = false; summary.warnings.push(SCHEMA_ADMIN_MESSAGE_); return summary; }
   finally { lock.releaseLock(); }

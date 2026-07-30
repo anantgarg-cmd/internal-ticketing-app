@@ -41,6 +41,8 @@
     /* 15. Reduced motion */
     .initial-loader{position:fixed;inset:0;z-index:200;background:#f4f7f5;display:grid;place-items:center;text-align:center}.initial-loader.hidden{display:none}.nav-group{padding:12px 12px 3px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--sf-grey-500)}.nav-copy{display:block;font-size:10px;font-weight:500;margin-top:3px}.admin-badge{background:var(--sf-yellow);color:var(--sf-black);border-radius:99px;padding:2px 6px;font-weight:800;margin-left:5px}.btn-small{min-height:34px;padding:6px 12px;margin-top:12px;font-size:12px}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:14px;flex-wrap:wrap}.pagination .hint{margin:0 auto 0 0}
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+    #ticketForm.form-submitting > :not(.actions) { pointer-events:none; }
+    #ticketForm.form-submitting { cursor:progress; }
   </style>
 </head>
 <body><div class="initial-loader" id="initialLoader"><div><span class="spinner"></span><h2 style="margin-top:14px">Loading your workspace…</h2></div></div>
@@ -124,7 +126,7 @@
   let MY_STATE={page:1,pageSize:50,totalRows:0,totalPages:1};
   let IN_FLIGHT=new Set(), SUBMISSION_REQUEST_ID='', SCHEMA_STARTUP_RETRIED=false;
   let QUEUE_STATE = { page: 1, pageSize: 50, totalRows: 0, totalPages: 1, categories: [] };
-  const EXPECTED_RELEASE = 'client-size-performance-v1';
+  const EXPECTED_RELEASE = 'ticketing-stability-v1';
   const FRONTEND_COMMIT = '__APP_COMMIT__';
   const VERSION_MISMATCH_MESSAGE = 'This web-app URL is running mismatched frontend and backend versions. Please contact the application administrator and share the URL being used.';
   const FIELD_DEFS = {
@@ -283,8 +285,15 @@
   function raiseDespiteDuplicate(){document.getElementById('duplicateOverride').value='true';closeModal('duplicateModal');actualSubmit();}
 
   function actualSubmit(){
-    const form=document.getElementById('ticketForm'); setBusy(true,'Uploading evidence and creating your ticket…'); Array.from(form.elements).forEach(x=>x.disabled=true); let rid=form.querySelector('[name=submissionRequestId]');if(!rid){rid=document.createElement('input');rid.type='hidden';rid.name='submissionRequestId';form.appendChild(rid);}rid.value=SUBMISSION_REQUEST_ID;
-    google.script.run.withSuccessHandler(ticket=>{Array.from(form.elements).forEach(x=>x.disabled=false);setBusy(false);invalidateTicketCaches();SUBMISSION_REQUEST_ID=uuid();toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.querySelector('input[name="clientMode"][value="existing"]').checked=true;document.getElementById('clientId').value='';document.getElementById('clientName').value='';document.getElementById('clientType').value='';document.getElementById('categoryId').innerHTML='<option value="">Select category</option>';document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();categoryChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{Array.from(form.elements).forEach(x=>x.disabled=false);setBusy(false);showError(err);}).submitTicket(form);
+    const requestKey='submitTicket';
+    if(IN_FLIGHT.has(requestKey))return;
+    const form=document.getElementById('ticketForm');
+    let rid=form.querySelector('[name=submissionRequestId]');if(!rid){rid=document.createElement('input');rid.type='hidden';rid.name='submissionRequestId';form.appendChild(rid);}
+    if(!SUBMISSION_REQUEST_ID)SUBMISSION_REQUEST_ID=uuid();
+    rid.value=SUBMISSION_REQUEST_ID;
+    IN_FLIGHT.add(requestKey);form.setAttribute('aria-busy','true');form.classList.add('form-submitting');setBusy(true,'Uploading evidence and creating your ticket…');
+    const restore=()=>{IN_FLIGHT.delete(requestKey);form.removeAttribute('aria-busy');form.classList.remove('form-submitting');setBusy(false);};
+    google.script.run.withSuccessHandler(ticket=>{restore();invalidateTicketCaches();SUBMISSION_REQUEST_ID='';toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.querySelector('input[name="clientMode"][value="existing"]').checked=true;document.getElementById('clientId').value='';document.getElementById('clientName').value='';document.getElementById('clientType').value='';document.getElementById('categoryId').innerHTML='<option value="">Select category</option>';document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();categoryChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{restore();showError(err);}).submitTicket(form);
   }
 
   function loadMyTickets(refresh=false){if(!refresh&&isFresh(TAB_CACHE.my,CACHE_TTL.my)){renderMyResponse(TAB_CACHE.my.data);return;}document.getElementById('myTickets').innerHTML=loading();google.script.run.withSuccessHandler(result=>{TAB_CACHE.my={data:result,at:Date.now()};renderMyResponse(result);}).withFailureHandler(err=>{document.getElementById('myTickets').innerHTML='<div class="empty">Tickets could not be loaded.</div>';showError(err);}).getMyTickets({page:MY_STATE.page,pageSize:MY_STATE.pageSize});}
