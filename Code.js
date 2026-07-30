@@ -5,9 +5,6 @@
 
 const APP_RELEASE = 'client-size-performance-v1';
 const APP_COMMIT = '__APP_COMMIT__';
-const APP_SCHEMA_VERSION = 'sla-cycles-v1';
-const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
-const SLA_SCHEMA_ADMIN_MESSAGE_ = 'The SLA-cycle schema could not be prepared. Please ask the application administrator to run upgradeSlaCycleSchema() once.';
 let SPREADSHEET_INSTANCE_ = null;
 let SLA_SCHEMA_RECOVERY_FAILED_ = false;
 const DEPLOYMENT_AUTHORIZATION_MESSAGE = 'The application deployment has not been authorized by its deploying account. Please ask the application administrator to run authorizeApplication() once from the Apps Script editor.';
@@ -805,41 +802,22 @@ function getCategoryById_(id) {
     .find(r => String(r.Category_ID) === String(id) && truthy_(r.Active));
 }
 
-/** Performs the deployment schema check once per schema version. */
-function ensureRuntimeSchema_() {
-  const properties = PropertiesService.getScriptProperties();
-  if (properties.getProperty(APP_SCHEMA_VERSION_PROPERTY_) === APP_SCHEMA_VERSION) return { ready: true, checked: false };
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    if (properties.getProperty(APP_SCHEMA_VERSION_PROPERTY_) === APP_SCHEMA_VERSION) return { ready: true, checked: false };
-    const result = ensureTicketSlaCyclesSchema_(true);
-    if (!result.ready) throw new Error(SLA_SCHEMA_ADMIN_MESSAGE_);
-    properties.setProperty(APP_SCHEMA_VERSION_PROPERTY_, APP_SCHEMA_VERSION);
-    return { ready: true, checked: true, sheetCreated: result.sheetCreated, columnsAdded: result.columnsAdded };
-  } catch (err) {
-    console.error('SLA-cycle runtime schema preparation failed: ' + String(err && err.message || err));
-    return { ready: false, checked: true };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
 /** Write paths must fail clearly rather than silently losing cycle history. */
 function requireTicketSlaCyclesSchemaForWrite_(lockAlreadyHeld) {
   try {
-    const result = ensureTicketSlaCyclesSchema_(Boolean(lockAlreadyHeld));
-    if (!result.ready) throw new Error(SLA_SCHEMA_ADMIN_MESSAGE_);
-    return result;
+    const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.SLA_CYCLES);
+    if (sheet) return { ready: true };
+    if (lockAlreadyHeld) throw new Error(SCHEMA_ADMIN_MESSAGE_);
+    getRequiredSheet_(APP.SHEETS.SLA_CYCLES);
+    return { ready: true };
   } catch (err) {
     console.error('SLA-cycle write schema preparation failed: ' + String(err && err.message || err));
-    throw new Error(SLA_SCHEMA_ADMIN_MESSAGE_);
+    throw new Error(SCHEMA_ADMIN_MESSAGE_);
   }
 }
 
 function getSheetObjects_(sheetName) {
-  const sheet = getSpreadsheet_().getSheetByName(sheetName);
-  if (!sheet) throw new Error(`Missing sheet: ${sheetName}`);
+  const sheet = getRequiredSheet_(sheetName);
   const lastRow = sheet.getLastRow();
   const lastColumn = sheet.getLastColumn();
   if (lastRow < 2 || lastColumn < 1) return [];
@@ -852,14 +830,14 @@ function getSheetObjects_(sheetName) {
 }
 
 function appendObject_(sheetName, object) {
-  const sheet = getSpreadsheet_().getSheetByName(sheetName);
+  const sheet = getRequiredSheet_(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
   sheet.getRange(sheet.getLastRow() + 1, 1, 1, headers.length)
     .setValues([headers.map(h => Object.prototype.hasOwnProperty.call(object, h) ? object[h] : '')]);
 }
 
 function findObjectRow_(sheetName, key, value) {
-  const sheet = getSpreadsheet_().getSheetByName(sheetName);
+  const sheet = getRequiredSheet_(sheetName);
   const lastColumn = sheet.getLastColumn();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2 || lastColumn < 1) return null;
@@ -878,7 +856,7 @@ function findObjectRow_(sheetName, key, value) {
 }
 
 function updateObjectRow_(sheetName, rowNumber, changes) {
-  const sheet = getSpreadsheet_().getSheetByName(sheetName);
+  const sheet = getRequiredSheet_(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
   Object.keys(changes).forEach(key => { if (headers.indexOf(key) < 0) throw new Error(`Column ${key} not found in ${sheetName}.`); });
   const range = sheet.getRange(rowNumber, 1, 1, headers.length);
@@ -907,7 +885,7 @@ function appendSlaCycle_(cycle) {
 function getTicketSlaCycles_(ticketId) {
   SLA_SCHEMA_RECOVERY_FAILED_ = false;
   try {
-    if (!getSpreadsheet_().getSheetByName(APP.SHEETS.SLA_CYCLES)) ensureTicketSlaCyclesSchema_();
+    if (!getSpreadsheet_().getSheetByName(APP.SHEETS.SLA_CYCLES)) getRequiredSheet_(APP.SHEETS.SLA_CYCLES);
     return getSheetObjects_(APP.SHEETS.SLA_CYCLES)
       .filter(cycle => String(cycle.Ticket_ID) === String(ticketId))
       .sort((a, b) => number_(b.Cycle_Number, 0) - number_(a.Cycle_Number, 0));
@@ -1185,8 +1163,7 @@ function extractDynamicFields_(form, category) {
 // -------------------- Duplicate matching --------------------
 
 function getRecentTicketObjects_(cutoff, batchSize) {
-  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.TICKETS);
-  if (!sheet) throw new Error(`Missing sheet: ${APP.SHEETS.TICKETS}`);
+  const sheet = getRequiredSheet_(APP.SHEETS.TICKETS);
   const lastRow = sheet.getLastRow();
   const lastColumn = sheet.getLastColumn();
   if (lastRow < 2 || lastColumn < 1) return { rows: [], processed: 0 };
@@ -1320,7 +1297,7 @@ function formatDateTimeOptional_(value) { return value ? formatDateTime_(value) 
 // -------------------- Client size and performance upgrade --------------------
 
 function getUserRowByEmail_(email) {
-  const sheet = getSpreadsheet_().getSheetByName(APP.SHEETS.USERS);
+  const sheet = getRequiredSheet_(APP.SHEETS.USERS);
   const width = sheet.getLastColumn(), height = sheet.getLastRow();
   if (width < 1 || height < 2) return null;
   const headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0].map(String);
@@ -1372,7 +1349,9 @@ function buildBootstrap_(user) {
 }
 
 function getInitialAppState() {
-  const startedAt = Date.now(), email = getVerifiedCompanyEmail_(), row = getUserRowByEmail_(email);
+  const startedAt = Date.now();
+  ensureRuntimeSchema_();
+  const email = getVerifiedCompanyEmail_(), row = getUserRowByEmail_(email);
   let result;
   if (!row) result = { state: 'REGISTER', email, release: APP_RELEASE };
   else if (!truthy_(row.Active)) result = { state: 'BLOCKED', email, message: 'Your access has been disabled. Please contact the application administrator.', release: APP_RELEASE };
@@ -1487,7 +1466,7 @@ function reopenTicket(payload) {
   const lock=LockService.getScriptLock(),wait=Date.now();lock.waitLock(10000);try{prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);const found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',payload.ticketId);if(!found)throw new Error('Ticket not found.');const ticket=found.object;assertCanReopen_(user,ticket);ensureLegacyInitialCycle_(ticket);const cycles=getTicketSlaCycles_(payload.ticketId);if(cycles.some(c=>String(c.SLA_Result)==='OPEN'))throw new Error('This ticket already has an open SLA cycle.');const now=new Date(),due=calculateWorkingSlaDueAt_(now,number_(ticket.SLA_Hours,0)),cycle=cycles.reduce((m,c)=>Math.max(m,number_(c.Cycle_Number,0)),0)+1,changes={Status:APP.STATUS.REOPENED,SLA_Due_At:due,SLA_Result:'',Updated_At:now,Updated_By:user.email,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',Current_SLA_Cycle:cycle};updateObjectRow_(APP.SHEETS.TICKETS,found.rowNumber,changes);appendSlaCycle_({Ticket_ID:payload.ticketId,Cycle_Number:cycle,Cycle_Type:'REOPEN',Started_At:now,Due_At:due,SLA_Result:'OPEN',Started_By:user.email,Reopen_Reason:reason,Created_At:now,Updated_At:now});appendEvent_(payload.ticketId,'TICKET_REOPENED',APP.STATUS.RESOLVED,APP.STATUS.REOPENED,user.email,reason,now,requestId);upsertTicketIndex_(Object.assign({},ticket,changes));invalidateTicketCaches_();}finally{lock.releaseLock();}const detail=getTicketDetail(payload.ticketId);try{sendSlackReopenedAlert_(detail,user.email,reason);}catch(err){console.error('Slack reopen alert failed.');}logPerformance_('reopenTicket',startedAt,{rows:1,lockWaitMs:Date.now()-wait});return detail;
 }
 
-function getRecentTicketObjects_(cutoff,batchSize) { const sheet=getSpreadsheet_().getSheetByName(APP.SHEETS.TICKET_INDEX);if(!sheet)throw new Error('TicketIndex is missing. Run upgradeClientSizeAndPerformanceSchema().');const lastRow=sheet.getLastRow(),width=sheet.getLastColumn();if(lastRow<2)return{rows:[],processed:0};const headers=sheet.getRange(1,1,1,width).getDisplayValues()[0].map(String),created=headers.indexOf('Created_At'),rows=[];let end=lastRow,processed=0,previous=null,unordered=false;while(end>=2){const count=Math.min(batchSize||200,end-1),start=end-count+1,values=sheet.getRange(start,1,count,width).getValues();processed+=count;for(let i=values.length-1;i>=0;i--){const date=toDate_(values[i][created]);if(previous&&date>previous){unordered=true;break;}previous=date;if(date<cutoff)return{rows,processed};rows.push(headers.reduce((o,h,j)=>{o[h]=values[i][j];return o;},{}));}if(unordered)break;end=start-1;}if(unordered){const all=getSheetObjects_(APP.SHEETS.TICKET_INDEX);return{rows:all.filter(t=>toDate_(t.Created_At)>=cutoff),processed:all.length};}return{rows,processed}; }
+function getRecentTicketObjects_(cutoff,batchSize) { const sheet=getRequiredSheet_(APP.SHEETS.TICKET_INDEX);const lastRow=sheet.getLastRow(),width=sheet.getLastColumn();if(lastRow<2)return{rows:[],processed:0};const headers=sheet.getRange(1,1,1,width).getDisplayValues()[0].map(String),created=headers.indexOf('Created_At'),rows=[];let end=lastRow,processed=0,previous=null,unordered=false;while(end>=2){const count=Math.min(batchSize||200,end-1),start=end-count+1,values=sheet.getRange(start,1,count,width).getValues();processed+=count;for(let i=values.length-1;i>=0;i--){const date=toDate_(values[i][created]);if(previous&&date>previous){unordered=true;break;}previous=date;if(date<cutoff)return{rows,processed};rows.push(headers.reduce((o,h,j)=>{o[h]=values[i][j];return o;},{}));}if(unordered)break;end=start-1;}if(unordered){const all=getSheetObjects_(APP.SHEETS.TICKET_INDEX);return{rows:all.filter(t=>toDate_(t.Created_At)>=cutoff),processed:all.length};}return{rows,processed}; }
 
 /** Category lookup reuses the 300-second active-configuration cache. */
 function getCategoryById_(id) {

@@ -28,47 +28,37 @@ For a safe status check, run `getAuthorizationDiagnostic` manually in the editor
 
 Do not change web-app access to public or ask regular users to authorize application services.
 
-## SLA-cycle schema recovery
+## Automatic, versioned spreadsheet schema
 
-Existing DEV and Production spreadsheets may predate ticket reopening and therefore may not contain the `TicketSLACycles` tab. Deploying Apps Script source does not migrate spreadsheet tabs. The application now repairs this additive schema automatically: `getInitialAppState()` checks the `APP_SCHEMA_VERSION` Script Property for `sla-cycles-v1`; only when the marker is absent or stale does it take a Script Lock, create or validate the tab, append missing columns, and then write the marker. It never invokes `setupSystem()`, creates attachment folders, seeds users, clears rows, reorders columns, or rebuilds source sheets.
+Apps Script deployments update source files but do not update an existing Google Sheet. Schema version **5** fixes that deployment gap generically. `getInitialAppState()` now calls `ensureRuntimeSchema_()` before users, settings, categories, client sizes, SLA cycles, or the ticket index can be read. The guard checks the durable `APP_SCHEMA_VERSION` property and all required sheet names; therefore a manually deleted tab is repaired even when the version property is current. A 300-second cache is used only as a hint, never as the source of truth.
 
-The exact `TicketSLACycles` columns are:
+The required tabs are `Tickets`, `Clients`, `Categories`, `Users`, `TicketEvents`, `Settings`, `TicketSLACycles`, `ClientSizePriority`, and `TicketIndex`. Migrations only create missing tabs, append missing headers, and seed absent Client Size codes. They never reorder headers, clear source rows, delete tabs, overwrite configuration edits, or change historical ticket priority. Timestamp formatting is resolved by header name so legacy column positions remain valid.
 
-`SLA_Cycle_ID`, `Ticket_ID`, `Cycle_Number`, `Cycle_Type`, `Started_At`, `Due_At`, `Ended_At`, `SLA_Result`, `Started_By`, `Ended_By`, `Reopen_Reason`, `Created_At`, `Updated_At`.
+A short Script Lock serializes schema writes. The first opener repairs the installation; concurrent openers receive `SCHEMA_UPGRADE_IN_PROGRESS`, see **Updating the application structure…**, and retry once. Persistent failures show a controlled instruction to run `repairApplicationSchema()` instead of a raw missing-sheet or stack-trace error. The spreadsheet menu **Internal Ticketing Admin** also exposes safe repair, validation, and derived-index rebuild commands. These are editor/spreadsheet administration actions and are not exposed in the web UI.
 
-`Cycle_Type` is `INITIAL` or `REOPEN`; `SLA_Result` is `OPEN`, `MET`, or `BREACHED`. New and reopened cycles continue to calculate their due date inside Monday-Friday, 11:30-19:30 Asia/Kolkata working hours. A legacy ticket gets a single initial cycle when it is first resolved or reopened. Read-only ticket details degrade to an empty SLA history if recovery is temporarily unavailable; ticket lists do not depend on that history. Writes fail with an administrator-facing upgrade instruction rather than omitting SLA history.
+`ClientSizePriority` seeds only absent `GOLD_PLATINUM`, `MEDIUM_SIZED`, and `SMALL_SIZED` codes. Administrator edits to existing codes are preserved. 360 ticket priority is resolved server-side from this configuration; Regular priority remains category-based.
 
-`upgradeSlaCycleSchema()` remains available as a safe, repeatable diagnostic/repair function, but it is not normally a required deployment step. It appends only absent headers and preserves every existing row. `upgradeClientSizeAndPerformanceSchema()` includes the same additive validation and does not clear or rebuild any source sheet.
+When a new/empty `TicketIndex` is found, existing `Tickets` are read without mutation and copied with batch `setValues()`. Up to 1,000 rows are processed per continuation, progress is saved in Script Properties, and a temporary time trigger continues a large backfill. The schema version is committed only after the index and complete schema validate. `rebuildTicketIndex()` remains the manual admin operation that clears/rebuilds only this derived tab.
+
+SLA history remains additive: new tickets create one `INITIAL` cycle; resolving closes the one open cycle; reopening preserves prior cycles and starts one `REOPEN` cycle from the reopen timestamp. Legacy tickets without cycle rows return an empty history on read and are derived only when a write needs a cycle. Working time remains Monday-Friday, 11:30-19:30, Asia/Kolkata.
 
 ## Deployment and validation runbook
 
 ### DEV (`develop`)
 
-1. Merge the pull request into `develop`; do not merge it into `main` yet.
-2. In GitHub Actions, open **Deploy Apps Script** for the merge commit and verify every job step succeeds. The workflow selects `CLASP_JSON_DEV` and `DEPLOYMENT_ID_DEV`, pushes the tracked Apps Script files, creates a version, and updates the existing DEV deployment.
-3. Open the existing DEV `/exec` URL as an authorized Shadowfax user. This first startup performs the locked schema recovery and writes `APP_SCHEMA_VERSION=sla-cycles-v1` only after success.
-4. In the DEV spreadsheet, verify `TicketSLACycles` exists, row 1 is frozen, the headers above are present, and any pre-existing rows and column order are unchanged.
-5. Validate **My Tickets** and **Shared Queue**, open a legacy ticket, raise one ticket, resolve it, reopen it with a reason, and resolve it again. Confirm cycle numbers increment, only the current cycle is `OPEN`, closed history remains unchanged, and working-hours due dates are correct.
-6. If startup reports a schema preparation problem, run `upgradeSlaCycleSchema()` once in the DEV Apps Script editor and inspect its non-sensitive summary; then reload the DEV URL. This is fallback remediation, not a normal step.
+1. Merge the feature pull request into `develop` and let the existing workflow update the DEV Apps Script deployment.
+2. Open the existing DEV `/exec` URL. The first request automatically upgrades the DEV spreadsheet; no tab creation or one-time schema function is required.
+3. Run `validateApplicationSchema()` in the editor or use the spreadsheet admin menu if an audit is desired.
+4. Smoke-test registration, role navigation, 360 and Regular ticket creation, pagination, resolve/reopen, attachments, Slack, and duplicate detection.
 
 ### Production (`main`, after DEV approval)
 
-1. After DEV validation, merge the already-reviewed `develop` changes into `main`; do not edit `main` directly.
-2. Verify the **Deploy Apps Script** workflow for that `main` merge selects `CLASP_JSON_PROD` and `DEPLOYMENT_ID_PROD` and successfully updates the existing Production deployment.
-3. Open the existing Production `/exec` URL as an authorized Shadowfax user. The first startup safely creates/validates `TicketSLACycles`; concurrent users are serialized by Script Lock, and later startups skip validation via the version marker.
-4. Verify the Production tab, exact headers, frozen header row, timestamp formatting, and preservation of existing tickets/events/users/settings and any SLA-cycle rows.
-5. Smoke-test **My Tickets**, **Shared Queue**, and one ticket detail. Then use an approved test ticket to validate initial, resolution, and reopen cycles without altering historical records.
-6. Only if automatic recovery explicitly reports failure, run `upgradeSlaCycleSchema()` once in the Production Apps Script editor as the deployment owner, review its summary, and reload the web app.
+1. After DEV validation, merge `develop` into `main`; do not edit `main` directly.
+2. Let the existing workflow update the Production deployment and open its `/exec` URL. The first request automatically upgrades the Production spreadsheet.
+3. Confirm `validateApplicationSchema().schemaReady` and perform the approved smoke tests.
 
-No one-time manual sheet creation is required. Existing OAuth authorization requirements are unchanged; `authorizeApplication()` is needed only when Google requires deployment-owner consent, as described above.
-
-## Client size and performance schema upgrade
-
-After deploying this release, an administrator must open the Apps Script editor and run
-`upgradeClientSizeAndPerformanceSchema()` exactly once in **DEV**, verify the returned summary and smoke-test ticket creation, then run the same function exactly once in **Production**. The function is idempotent and may safely be retried: it only creates missing derived/configuration sheets, appends missing headers, seeds missing client-size codes, and rebuilds `TicketIndex`. It never clears or rewrites Tickets, TicketEvents, Users, Categories, Settings, or TicketSLACycles, and it does not reprioritise historical tickets.
-
-`TicketIndex` is lightweight derived data used for lists, duplicate checks, and the SLA dashboard; ticket detail continues to read the authoritative `Tickets` sheet. Client-size priority is configured in `ClientSizePriority`, not in browser code. Configuration changes should be followed by running the upgrade/cache invalidation function or deploying a small admin maintenance function that calls `invalidateApplicationCaches_()`.
+No administrator must manually create `ClientSizePriority`, `TicketSLACycles`, `TicketIndex`, or any base tab. The only unavoidable manual step remains deployment-owner OAuth consent through `authorizeApplication()` when Google reports that new or renewed scopes require it; regular users must not authorize the deployment.
 
 ### Capacity note
 
-The shorter locks, idempotency keys, caches, index, and pagination improve behaviour for bursts of approximately 30–40 users, but Google Sheets and Apps Script are not a database or a database-grade concurrency system. Apps Script execution quotas, service throttling, spreadsheet write serialization, cache eviction, and lock contention remain platform limits. Monitor execution logs and sheet growth; archive operational data deliberately if volumes exceed practical spreadsheet limits.
+The lock, idempotency keys, caches, batched index, and pagination are designed for bursts of roughly 30–40 users. Google Apps Script and Sheets quotas still apply; monitor execution logs and archive operational data deliberately as volume grows.
