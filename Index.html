@@ -34,10 +34,11 @@
     .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(35,31,32,.62);z-index:50;align-items:center;justify-content:center;padding:20px}.modal-backdrop.show{display:flex;animation:fadeIn .16s}.modal{background:white;border-radius:14px;max-width:860px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:0 24px 24px;box-shadow:0 18px 60px rgba(0,0,0,.22)}.modal-header{display:flex;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:2;background:white;padding:22px 0 16px;border-bottom:1px solid var(--line)}.modal-header h2{margin:0}.close{border:0;background:var(--sf-grey-100);font-size:24px;cursor:pointer;width:44px;height:44px;border-radius:8px}.detail-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.detail{background:var(--sf-grey-100);border:1px solid var(--line);border-radius:8px;padding:12px}.detail b{display:block;font-size:10px;color:var(--sf-grey-700);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}.pre{white-space:pre-wrap;word-break:break-word;background:var(--sf-grey-100);border:1px solid var(--line);border-radius:8px;padding:14px}.timeline{border-left:2px solid var(--sf-green-soft-2);padding-left:18px;margin-left:7px}.timeline-item{margin:16px 0}.timeline-item small{color:var(--sf-grey-700)}#duplicateModal .modal{max-width:680px;border-top:5px solid var(--sf-amber)}.duplicate-card{margin:10px 0;background:var(--sf-yellow-soft);border-color:#e4d77e}
     /* 13. Toasts and states */
     .toast{position:fixed;right:18px;bottom:18px;z-index:100;background:var(--sf-green-dark);color:white;padding:13px 17px;border-radius:9px;display:none;max-width:min(420px,calc(100vw - 36px));box-shadow:0 10px 30px rgba(0,0,0,.18)}.toast.show{display:block;animation:toastIn .16s}.toast.error{background:var(--danger)}.empty{text-align:center;color:var(--sf-grey-700);padding:36px 20px}.spinner{display:inline-block;width:18px;height:18px;border:3px solid rgba(128,130,133,.28);border-top-color:var(--sf-green);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle}.registration-card{max-width:620px;margin:36px auto;padding:32px;border-top:5px solid var(--sf-yellow)}.registration-copy{color:var(--sf-grey-700);margin-bottom:24px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeIn{from{opacity:0}}@keyframes toastIn{from{opacity:0;transform:translateY(8px)}}
+    .global-processing-loader{display:none;position:fixed;inset:0;z-index:300;background:rgba(35,31,32,.28);place-items:center;padding:18px}.global-processing-loader.show{display:grid}.global-processing-card{display:flex;align-items:center;gap:14px;max-width:min(420px,calc(100vw - 36px));background:white;border-radius:12px;padding:20px 24px;box-shadow:0 18px 60px rgba(0,0,0,.24);font-weight:700}.activity-search{display:grid;grid-template-columns:minmax(220px,1fr) auto auto;gap:10px;align-items:center;margin-bottom:16px}.activity-search .btn{margin:0}
     /* 14. Responsive rules */
     @media(max-width:1000px){.metric-grid{grid-template-columns:repeat(3,1fr)}.filters{grid-template-columns:repeat(2,1fr)}.filters input:first-child{grid-column:1/-1}}
     @media(max-width:800px){header{height:72px;padding:10px 16px}.brand-title h1{font-size:15px}.brand-title p{font-size:10px}.app-layout{display:block}nav{height:auto;position:sticky;top:72px;flex-direction:row;overflow-x:auto;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line)}nav:before{display:none}nav button{flex:0 0 auto;text-align:center;min-width:120px}main{padding:22px 18px 40px}.grid,.grid-3,.detail-grid{grid-template-columns:1fr}.full{grid-column:auto}.summary{grid-template-columns:1fr}.summary>div{border-right:0;border-bottom:1px solid #ddd98a;padding:10px 14px}.metric-grid{grid-template-columns:1fr 1fr}.form-section,.card{padding:20px}}
-    @media(max-width:520px){header{gap:8px}.header-meta{gap:6px}.release-indicator{display:none}.user{min-width:0;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title{padding-left:10px}.brand-title p{display:none}main{padding:16px 10px 32px}.registration-card{margin:8px auto;padding:20px}.radio-options,.segmented{flex-direction:column}.filters{grid-template-columns:1fr}.filters input:first-child{grid-column:auto}.metric-grid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column-reverse}.actions .btn{width:100%}.modal-backdrop{padding:0}.modal{height:100vh;max-height:100vh;border-radius:0;padding:0 16px 18px}.bar-name{width:100px}.toast{right:10px;bottom:10px}}
+    @media(max-width:520px){header{gap:8px}.header-meta{gap:6px}.release-indicator{display:none}.user{min-width:0;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title{padding-left:10px}.brand-title p{display:none}main{padding:16px 10px 32px}.registration-card{margin:8px auto;padding:20px}.radio-options,.segmented{flex-direction:column}.filters{grid-template-columns:1fr}.filters input:first-child{grid-column:auto}.metric-grid{grid-template-columns:1fr}.actions{align-items:stretch;flex-direction:column-reverse}.actions .btn{width:100%}.modal-backdrop{padding:0}.modal{height:100vh;max-height:100vh;border-radius:0;padding:0 16px 18px}.bar-name{width:100px}.toast{right:10px;bottom:10px}.activity-search{grid-template-columns:1fr 1fr}.activity-search input{grid-column:1/-1}}
     /* 15. Reduced motion */
     .initial-loader{position:fixed;inset:0;z-index:200;background:#f4f7f5;display:grid;place-items:center;text-align:center}.initial-loader.hidden{display:none}.nav-group{padding:12px 12px 3px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--sf-grey-500)}.nav-copy{display:block;font-size:10px;font-weight:500;margin-top:3px}.admin-badge{background:var(--sf-yellow);color:var(--sf-black);border-radius:99px;padding:2px 6px;font-weight:800;margin-left:5px}.btn-small{min-height:34px;padding:6px 12px;margin-top:12px;font-size:12px}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:14px;flex-wrap:wrap}.pagination .hint{margin:0 auto 0 0}
     @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
@@ -106,7 +107,7 @@
     </div>
   </section>
 
-  <section id="myPage" class="page"><div class="page-intro"><div class="eyebrow">Your activity</div><h2 id="myTitle">My Raised Tickets</h2><p id="myHint"></p><button class="btn btn-secondary btn-small" onclick="loadMyTickets(true)">Refresh</button></div><div class="card"><div id="myTickets"></div></div></section>
+  <section id="myPage" class="page"><div class="page-intro"><div class="eyebrow" id="myEyebrow">My activity</div><h2 id="myTitle">Tickets Raised by Me</h2><p id="myDescription">Track requests raised by you.</p><p class="hint" id="myHint"></p></div><div class="card"><div class="activity-search"><input id="activityTicketSearch" type="search" aria-label="Search activity tickets"><button id="activityTicketClear" class="btn btn-secondary btn-small" type="button" hidden>Clear</button><button class="btn btn-secondary btn-small" type="button" onclick="loadMyTickets(true)">Refresh</button></div><div id="myTickets"></div></div></section>
 
   <section id="queuePage" class="page"><div class="page-intro"><div class="eyebrow">Operations workbench</div><h2>Tech/Product Work Queue</h2><p>This is the common queue for Tech/Product. Open a ticket to investigate or resolve it.</p><button class="btn btn-secondary btn-small" onclick="loadQueue(true)">Refresh</button></div><div class="card"><div class="filters"><input id="qSearch" placeholder="Search ticket, client or subject"><select id="qStatus"><option value="OPEN">Open only</option><option value="">All statuses</option><option>Raised</option><option>Reopened</option><option>Investigating</option><option>Resolved</option></select><select id="qPriority"><option value="">All priorities</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select><select id="qCategory"><option value="">All categories</option></select><select id="qClientSize"><option value="">All client sizes</option></select><select id="qSla"><option value="">All SLA states</option><option>OVERDUE</option><option>ON TRACK</option><option>MET</option><option>BREACHED</option></select></div><div id="queueTickets"></div><div id="queuePagination" class="pagination"></div></div></section>
 
@@ -118,15 +119,17 @@
 <div class="modal-backdrop" id="detailModal"><div class="modal" id="detailContent"></div></div>
 <div class="modal-backdrop" id="reopenModal"><div class="modal" id="reopenContent"></div></div>
 <div class="toast" id="toast"></div>
+<div id="globalProcessingLoader" class="global-processing-loader" role="status" aria-live="polite" aria-busy="true"><div class="global-processing-card"><span class="spinner" aria-hidden="true"></span><div id="globalProcessingText">Processing your request…</div></div></div>
 
 <script>
   let BOOT = null, QUEUE = [], CURRENT_TICKET = null, SEARCH_TIMER = null;
-  const TAB_CACHE = { my: null, queue: new Map(), numbers: null };
-  const CACHE_TTL = { my: 30000, queue: 20000, numbers: 60000 };
-  let MY_STATE={page:1,pageSize:50,totalRows:0,totalPages:1};
+  const TAB_CACHE = { activity: new Map(), queue: new Map(), numbers: null };
+  const CACHE_TTL = { activity: 30000, queue: 20000, numbers: 60000 };
+  let MY_STATE={search:'',page:1,pageSize:50,totalRows:0,totalPages:1};
   let IN_FLIGHT=new Set(), SUBMISSION_REQUEST_ID='', SCHEMA_STARTUP_RETRIED=false;
   let QUEUE_STATE = { page: 1, pageSize: 50, totalRows: 0, totalPages: 1, categories: [] };
-  const EXPECTED_RELEASE = 'ticketing-stability-v1';
+  const EXPECTED_RELEASE = 'sales-tickets-search-loader-v1';
+  const GLOBAL_LOADER_TOKENS=new Map();
   const FRONTEND_COMMIT = '__APP_COMMIT__';
   const VERSION_MISMATCH_MESSAGE = 'This web-app URL is running mismatched frontend and backend versions. Please contact the application administrator and share the URL being used.';
   const FIELD_DEFS = {
@@ -143,7 +146,18 @@
     document.getElementById('categoryId').addEventListener('change', categoryChanged); document.getElementById('clientSize').addEventListener('change',categoryChanged);
     ['qStatus','qPriority','qCategory','qClientSize','qSla'].forEach(id => document.getElementById(id)?.addEventListener('change',()=>{QUEUE_STATE.page=1;loadQueue(true);}));
     document.getElementById('qSearch').addEventListener('input',()=>{clearTimeout(SEARCH_TIMER);SEARCH_TIMER=setTimeout(()=>{QUEUE_STATE.page=1;loadQueue(true);},300);});
+    const activitySearch=document.getElementById('activityTicketSearch');
+    activitySearch.addEventListener('keydown',event=>{if(event.key==='Enter')event.preventDefault();});
+    activitySearch.addEventListener('input',()=>{document.getElementById('activityTicketClear').hidden=!activitySearch.value;clearTimeout(SEARCH_TIMER);SEARCH_TIMER=setTimeout(()=>{MY_STATE.search=activitySearch.value.trim();MY_STATE.page=1;loadMyTickets();},300);});
+    document.getElementById('activityTicketClear').addEventListener('click',()=>{activitySearch.value='';document.getElementById('activityTicketClear').hidden=true;MY_STATE.search='';MY_STATE.page=1;loadMyTickets();activitySearch.focus();});
   });
+
+  function showGlobalLoader(message){
+    const token=uuid(),loader=document.getElementById('globalProcessingLoader');
+    const timer=setTimeout(()=>{if(!GLOBAL_LOADER_TOKENS.has(token))return;document.getElementById('globalProcessingText').textContent=message||'Processing your request…';loader.classList.add('show');},175);
+    GLOBAL_LOADER_TOKENS.set(token,timer);return token;
+  }
+  function hideGlobalLoader(token){if(token){clearTimeout(GLOBAL_LOADER_TOKENS.get(token));GLOBAL_LOADER_TOKENS.delete(token);}else{GLOBAL_LOADER_TOKENS.forEach(clearTimeout);GLOBAL_LOADER_TOKENS.clear();}if(!GLOBAL_LOADER_TOKENS.size)document.getElementById('globalProcessingLoader')?.classList.remove('show');}
 
   function appRequest(options){
     const key=options.key||options.method;
@@ -151,16 +165,17 @@
     IN_FLIGHT.add(key);
     const button=options.button;
     if(button) button.disabled=true;
+    const loaderToken=options.showLoader===false?null:showGlobalLoader(options.loaderText);
     let finished=false;
-    const finish=()=>{if(finished)return false;finished=true;IN_FLIGHT.delete(key);clearTimeout(timer);if(button)button.disabled=false;return true;};
+    const finish=()=>{if(finished)return false;finished=true;IN_FLIGHT.delete(key);clearTimeout(timer);hideGlobalLoader(loaderToken);if(button)button.disabled=false;if(options.always)options.always();return true;};
     const timer=setTimeout(()=>{if(finish()){(options.failure||showError)({message:'This request is taking longer than expected. It may still finish; wait before retrying.'});}},options.timeout||45000);
-    let runner=google.script.run.withSuccessHandler(value=>{if(finish())(options.success||(()=>{}))(value);}).withFailureHandler(error=>{if(finish())(options.failure||showError)(error);});
-    if(Object.prototype.hasOwnProperty.call(options,'payload')) runner[options.method](options.payload); else runner[options.method]();
+    try{let runner=google.script.run.withSuccessHandler(value=>{if(finish())(options.success||(()=>{}))(value);}).withFailureHandler(error=>{if(finish())(options.failure||showError)(error);});
+    if(Object.prototype.hasOwnProperty.call(options,'payload')) runner[options.method](options.payload); else runner[options.method]();}catch(error){if(finish())(options.failure||showError)(error);}
     return true;
   }
 
   function requestInitialState(){
-    appRequest({key:'initial',method:'getInitialAppState',success:handleEntryState,failure:handleInitialFailure,timeout:30000});
+    appRequest({key:'initial',method:'getInitialAppState',showLoader:false,success:handleEntryState,failure:handleInitialFailure,timeout:30000});
   }
 
   function handleInitialFailure(error){
@@ -205,25 +220,25 @@
     const form=event.currentTarget;
     if(!form.reportValidity()) return;
     const button=document.getElementById('registrationSubmitBtn');
-    button.disabled=true;
     button.textContent='Registering...';
     const payload={name:form.name.value,role:form.role.value};
-    google.script.run
-      .withSuccessHandler(handleEntryState)
-      .withFailureHandler(err=>{button.disabled=false;button.textContent='Register and continue';showError(err);})
-      .registerFirstTimeUser(payload);
+    appRequest({method:'registerFirstTimeUser',payload,button,loaderText:'Setting up your workspace…',success:handleEntryState,failure:showError,always:()=>button.textContent='Register and continue'});
   }
 
   function init(data){
     BOOT=data; document.getElementById('userInfo').innerHTML=`${esc(data.user.name)} ${data.user.role==='ADMIN'?'<span class="admin-badge">ADMIN</span>':''}<br>${esc(data.user.role)}`;
+    const sales=data.user.role==='SALES';
     document.getElementById('myHint').textContent=`All open tickets plus tickets resolved in the last ${data.resolvedVisibilityDays} days.`;
+    document.getElementById('myEyebrow').textContent=sales?'Sales activity':'My activity';
+    document.getElementById('myDescription').textContent=sales?'View and search open tickets and recently resolved requests raised by the Sales team.':'Track requests raised by you.';
+    document.getElementById('activityTicketSearch').placeholder=sales?'Search Sales tickets by ticket, client, category, subject or raiser':'Search tickets raised by you';
     buildNav(); clientModeChanged(); SUBMISSION_REQUEST_ID=uuid(); showPage(data.user.role==='SALES'?'raisePage':'queuePage');
   }
 
   function buildNav(){
     const sales=BOOT.user.role==='SALES';
-    const groups=sales?[['Sales workspace',[['raisePage','＋','Raise a Ticket','Send a new client issue to Tech/Product'],['myPage','◷','My Raised Tickets','Track the requests raised by you']]]]:[['Tech/Product workspace',[['queuePage','☷','Work Queue','Review, investigate and resolve client issues'],['numbersPage','▥','SLA Dashboard','Track open tickets, overdue tickets and SLA performance']]],['My activity',[['raisePage','＋','Raise a Ticket','Raise a request when needed'],['myPage','◷','Tickets Raised by Me','Track requests raised by you']]]];
-    document.getElementById('myTitle').textContent=sales?'My Raised Tickets':'Tickets Raised by Me';
+    const groups=sales?[['Sales workspace',[['raisePage','＋','Raise a Ticket','Send a new client issue to Tech/Product'],['myPage','◷','Sales Tickets','View and search requests raised by the Sales team.']]]]:[['Tech/Product workspace',[['queuePage','☷','Work Queue','Review, investigate and resolve client issues'],['numbersPage','▥','SLA Dashboard','Track open tickets, overdue tickets and SLA performance']]],['My activity',[['raisePage','＋','Raise a Ticket','Raise a request when needed'],['myPage','◷','Tickets Raised by Me','Track requests raised by you']]]];
+    document.getElementById('myTitle').textContent=sales?'Sales Tickets':'Tickets Raised by Me';
     document.getElementById('nav').innerHTML=groups.map(g=>`<div class="nav-group">${g[0]}</div>`+g[1].map(x=>`<button data-page="${x[0]}" onclick="showPage('${x[0]}')"><span>${x[1]} ${x[2]}</span><small class="nav-copy">${x[3]}</small></button>`).join('')).join('');
   }
 
@@ -274,7 +289,7 @@
     e.preventDefault(); const form=e.currentTarget;
     if(!form.reportValidity()) return;
     const payload={clientMode:form.clientMode.value,clientId:form.clientId.value,clientName:form.clientName.value,clientType:form.clientType.value,categoryId:form.categoryId.value,emailSubject:form.emailSubject.value};
-    setBusy(true,'Checking for similar tickets…'); google.script.run.withSuccessHandler(result=>{setBusy(false);if(result.hasDuplicate)showDuplicates(result.matches);else actualSubmit();}).withFailureHandler(err=>{setBusy(false);showError(err);}).checkDuplicate(payload);
+    setBusy(true,'Checking for similar tickets…'); appRequest({method:'checkDuplicate',payload,loaderText:'Checking for similar tickets…',success:result=>{setBusy(false);if(result.hasDuplicate)showDuplicates(result.matches);else actualSubmit();},failure:err=>{setBusy(false);showError(err);}});
   }
 
   function showDuplicates(matches){
@@ -291,18 +306,19 @@
     let rid=form.querySelector('[name=submissionRequestId]');if(!rid){rid=document.createElement('input');rid.type='hidden';rid.name='submissionRequestId';form.appendChild(rid);}
     if(!SUBMISSION_REQUEST_ID)SUBMISSION_REQUEST_ID=uuid();
     rid.value=SUBMISSION_REQUEST_ID;
-    IN_FLIGHT.add(requestKey);form.setAttribute('aria-busy','true');form.classList.add('form-submitting');setBusy(true,'Uploading evidence and creating your ticket…');
-    const restore=()=>{IN_FLIGHT.delete(requestKey);form.removeAttribute('aria-busy');form.classList.remove('form-submitting');setBusy(false);};
-    google.script.run.withSuccessHandler(ticket=>{restore();invalidateTicketCaches();SUBMISSION_REQUEST_ID='';toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.querySelector('input[name="clientMode"][value="existing"]').checked=true;document.getElementById('clientId').value='';document.getElementById('clientName').value='';document.getElementById('clientType').value='';document.getElementById('categoryId').innerHTML='<option value="">Select category</option>';document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();categoryChanged();showTicket(ticket.ticketId);}).withFailureHandler(err=>{restore();showError(err);}).submitTicket(form);
+    form.setAttribute('aria-busy','true');form.classList.add('form-submitting');setBusy(true,'Uploading evidence and creating your ticket…');
+    const restore=()=>{form.removeAttribute('aria-busy');form.classList.remove('form-submitting');setBusy(false);};
+    appRequest({key:requestKey,method:'submitTicket',payload:form,loaderText:'Uploading evidence and creating your ticket…',always:restore,success:ticket=>{invalidateTicketCaches();SUBMISSION_REQUEST_ID='';toast(`Ticket ${ticket.ticketId} raised successfully.`);form.reset();document.querySelector('input[name="clientMode"][value="existing"]').checked=true;document.getElementById('clientId').value='';document.getElementById('clientName').value='';document.getElementById('clientType').value='';document.getElementById('categoryId').innerHTML='<option value="">Select category</option>';document.getElementById('duplicateOverride').value='false';document.getElementById('duplicateIds').value='';clientModeChanged();categoryChanged();showTicket(ticket.ticketId);},failure:showError});
   }
 
-  function loadMyTickets(refresh=false){if(!refresh&&isFresh(TAB_CACHE.my,CACHE_TTL.my)){renderMyResponse(TAB_CACHE.my.data);return;}document.getElementById('myTickets').innerHTML=loading();google.script.run.withSuccessHandler(result=>{TAB_CACHE.my={data:result,at:Date.now()};renderMyResponse(result);}).withFailureHandler(err=>{document.getElementById('myTickets').innerHTML='<div class="empty">Tickets could not be loaded.</div>';showError(err);}).getMyTickets({page:MY_STATE.page,pageSize:MY_STATE.pageSize});}
-  function renderMyResponse(r){MY_STATE={...MY_STATE,page:r.page,totalRows:r.totalRows,totalPages:r.totalPages};renderTable('myTickets',r.rows);const start=r.totalRows?(r.page-1)*r.pageSize+1:0,end=Math.min(r.page*r.pageSize,r.totalRows);document.getElementById('myTickets').insertAdjacentHTML('beforeend',`<div class="pagination"><span class="hint">Showing ${start}–${end} of ${r.totalRows} tickets</span><button class="btn btn-secondary btn-small" ${r.page<=1?'disabled':''} onclick="MY_STATE.page--;TAB_CACHE.my=null;loadMyTickets()">Previous</button><button class="btn btn-secondary btn-small" ${r.page>=r.totalPages?'disabled':''} onclick="MY_STATE.page++;TAB_CACHE.my=null;loadMyTickets()">Next</button></div>`);}
+  function activityCacheKey(){return JSON.stringify({scope:BOOT.user.role==='SALES'?'sales':'personal',search:MY_STATE.search.toLowerCase(),page:MY_STATE.page,pageSize:MY_STATE.pageSize});}
+  function loadMyTickets(refresh=false){const key=activityCacheKey(),cached=TAB_CACHE.activity.get(key);if(!refresh&&isFresh(cached,CACHE_TTL.activity)){renderMyResponse(cached.data);return;}document.getElementById('myTickets').innerHTML=loading();appRequest({key:'activity:'+key,method:'getMyTickets',payload:{search:MY_STATE.search,page:MY_STATE.page,pageSize:MY_STATE.pageSize},loaderText:BOOT.user.role==='SALES'?'Loading Sales tickets…':'Loading your tickets…',success:result=>{TAB_CACHE.activity.set(key,{data:result,at:Date.now()});renderMyResponse(result);},failure:err=>{document.getElementById('myTickets').innerHTML='<div class="empty">Tickets could not be loaded.</div>';showError(err);}});}
+  function renderMyResponse(r){MY_STATE={...MY_STATE,page:r.page,totalRows:r.totalRows,totalPages:r.totalPages};renderTable('myTickets',r.rows,BOOT.user.role==='SALES');const start=r.totalRows?(r.page-1)*r.pageSize+1:0,end=Math.min(r.page*r.pageSize,r.totalRows);document.getElementById('myTickets').insertAdjacentHTML('beforeend',`<div class="pagination"><span class="hint">Showing ${start}–${end} of ${r.totalRows} tickets</span><button class="btn btn-secondary btn-small" ${r.page<=1?'disabled':''} onclick="MY_STATE.page--;loadMyTickets()">Previous</button><button class="btn btn-secondary btn-small" ${r.page>=r.totalPages?'disabled':''} onclick="MY_STATE.page++;loadMyTickets()">Next</button></div>`);}
   function queueFilters(){return {search:document.getElementById('qSearch').value,status:document.getElementById('qStatus').value,priority:document.getElementById('qPriority').value,category:document.getElementById('qCategory').value,clientSize:document.getElementById('qClientSize').value,sla:document.getElementById('qSla').value,page:QUEUE_STATE.page,pageSize:QUEUE_STATE.pageSize};}
   function loadQueue(refresh=false){
     const filters=queueFilters(),key=JSON.stringify(filters),cached=TAB_CACHE.queue.get(key);
     if(!refresh&&isFresh(cached,CACHE_TTL.queue)){renderQueueResponse(cached.data);return;}
-    document.getElementById('queueTickets').innerHTML=loading(); google.script.run.withSuccessHandler(result=>{TAB_CACHE.queue.set(key,{data:result,at:Date.now()});renderQueueResponse(result);}).withFailureHandler(err=>{document.getElementById('queueTickets').innerHTML='<div class="empty">The work queue could not be loaded. Please try again.</div>';showError(err);}).getQueueTickets(filters);
+    document.getElementById('queueTickets').innerHTML=loading(); appRequest({key:'queue:'+key,method:'getQueueTickets',payload:filters,loaderText:'Loading the work queue…',success:result=>{TAB_CACHE.queue.set(key,{data:result,at:Date.now()});renderQueueResponse(result);},failure:err=>{document.getElementById('queueTickets').innerHTML='<div class="empty">The work queue could not be loaded. Please try again.</div>';showError(err);}});
   }
   function renderQueueResponse(result){QUEUE=result.rows;QUEUE_STATE={...QUEUE_STATE,page:result.page,pageSize:result.pageSize,totalRows:result.totalRows,totalPages:result.totalPages,categories:result.categories};populateQueueCategories();renderTable('queueTickets',QUEUE,true);const start=result.totalRows?(result.page-1)*result.pageSize+1:0,end=Math.min(result.page*result.pageSize,result.totalRows);document.getElementById('queuePagination').innerHTML=`<span class="hint">Showing ${start}–${end} of ${result.totalRows} tickets</span><button class="btn btn-secondary btn-small" ${result.page<=1?'disabled':''} onclick="changeQueuePage(-1)">Previous</button><button class="btn btn-secondary btn-small" ${result.page>=result.totalPages?'disabled':''} onclick="changeQueuePage(1)">Next</button>`;}
   function populateQueueCategories(){const s=document.getElementById('qCategory'),current=s.value;s.innerHTML='<option value="">All categories</option>'+QUEUE_STATE.categories.map(x=>`<option>${esc(x)}</option>`).join('');s.value=current;}
@@ -313,7 +329,7 @@
     document.getElementById(target).innerHTML=`<div class="table-wrap"><table><thead><tr><th>Ticket</th><th>Created</th><th>Client</th><th>Client Size</th><th>Category</th><th>Subject</th><th>Priority</th><th>Status</th><th>SLA</th>${showRaiser?'<th>Raiser</th>':''}</tr></thead><tbody>${rows.map(t=>`<tr class="clickable" onclick="showTicket('${escAttr(t.ticketId)}')"><td><b>${esc(t.ticketId)}</b></td><td>${esc(t.createdAt)}</td><td>${esc(t.clientName)}</td><td>${esc(t.clientSize||'—')}</td><td>${esc(t.categoryName)}</td><td class="subject-cell">${esc(t.emailSubject)}</td><td><span class="badge ${escAttr(t.priority)}">${esc(t.priority)}</span></td><td><span class="badge ${escAttr(t.status)}">${esc(t.status)}</span></td><td><span class="badge ${escAttr(t.slaStatus.replace(' ','-'))}">${esc(t.slaStatus)}</span><br><small>${esc(t.slaDueAt)}</small></td>${showRaiser?`<td>${esc(t.raiserEmail)}</td>`:''}</tr>`).join('')}</tbody></table></div>`;
   }
 
-  function showTicket(id){openModal('detailModal');document.getElementById('detailContent').innerHTML=loading();google.script.run.withSuccessHandler(renderDetail).withFailureHandler(err=>{closeModal('detailModal');showError(err);}).getTicketDetail(id);}
+  function showTicket(id){openModal('detailModal');document.getElementById('detailContent').innerHTML=loading();appRequest({key:'detail:'+id,method:'getTicketDetail',payload:id,loaderText:'Loading ticket details…',success:renderDetail,failure:err=>{closeModal('detailModal');showError(err);}});}
   function renderDetail(t){
     CURRENT_TICKET=t; const canUpdate=['POC','ADMIN'].includes(BOOT.user.role)&&t.status!=='Resolved';
     const dynamic=Object.entries(t.dynamicFields||{}).map(([k,v])=>`<div class="detail"><b>${esc((FIELD_DEFS[k]||[k])[0])}</b>${esc(v)}</div>`).join('');
@@ -330,21 +346,21 @@
   function openReopenForm(){
     const t=CURRENT_TICKET; openModal('reopenModal');
     document.getElementById('reopenContent').innerHTML=`<div class="modal-header"><h2>Reopen Ticket</h2><button class="close" onclick="closeModal('reopenModal')">×</button></div><div class="detail-grid" style="margin-top:16px"><div class="detail"><b>Ticket ID</b>${esc(t.ticketId)}</div><div class="detail"><b>Previous resolved date</b>${esc(t.resolvedAt)}</div><div class="detail full"><b>Previous resolution note</b>${esc(t.resolutionNote)}</div><div class="detail"><b>Current SLA hours</b>${t.slaHours}</div><div class="detail"><b>Estimated new SLA due</b><span id="reopenDue"><span class="spinner"></span></span></div></div><label class="required" style="margin-top:18px">Reason for reopening / latest client response</label><textarea id="reopenReason" maxlength="5000" required></textarea><div class="actions"><button class="btn btn-secondary" onclick="closeModal('reopenModal')">Cancel</button><button class="btn btn-risk" id="confirmReopen" onclick="confirmReopen()">Confirm Reopen</button></div>`;
-    google.script.run.withSuccessHandler(x=>document.getElementById('reopenDue').textContent=x.dueAt).withFailureHandler(showError).getReopenPreview(t.ticketId);
+    appRequest({key:'reopenPreview:'+t.ticketId,method:'getReopenPreview',payload:t.ticketId,loaderText:'Preparing the new SLA cycle…',success:x=>document.getElementById('reopenDue').textContent=x.dueAt,failure:showError});
   }
-  function confirmReopen(){const reason=document.getElementById('reopenReason').value.trim(),btn=document.getElementById('confirmReopen');if(!reason){toast('Reopening reason is mandatory.',true);return;}btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Reopening...';google.script.run.withSuccessHandler(t=>{closeModal('reopenModal');invalidateTicketCaches();renderDetail(t);updateQueueCacheTicket(t);if(document.getElementById('queuePage').classList.contains('active'))loadQueue(true);toast(`Ticket ${t.ticketId} reopened.`);}).withFailureHandler(err=>{btn.disabled=false;btn.textContent='Confirm Reopen';showError(err);}).reopenTicket({ticketId:CURRENT_TICKET.ticketId,reopenReason:reason,actionRequestId:uuid()});}
+  function confirmReopen(){const reason=document.getElementById('reopenReason').value.trim(),btn=document.getElementById('confirmReopen');if(!reason){toast('Reopening reason is mandatory.',true);return;}btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Reopening...';appRequest({method:'reopenTicket',payload:{ticketId:CURRENT_TICKET.ticketId,reopenReason:reason,actionRequestId:uuid()},button:btn,loaderText:'Reopening the ticket…',always:()=>btn.textContent='Confirm Reopen',success:t=>{closeModal('reopenModal');invalidateTicketCaches();renderDetail(t);updateQueueCacheTicket(t);if(document.getElementById('queuePage').classList.contains('active'))loadQueue(true);toast(`Ticket ${t.ticketId} reopened.`);},failure:showError});}
   function moveToInvestigating(){updateStatus({ticketId:CURRENT_TICKET.ticketId,newStatus:'Investigating'});}
   function resolveTicket(){const root=document.getElementById('resolveRoot').value,note=document.getElementById('resolveNote').value;if(!root||!note.trim()){toast('Root cause and resolution note are mandatory.',true);return;}updateStatus({ticketId:CURRENT_TICKET.ticketId,newStatus:'Resolved',rootCause:root,resolutionNote:note});}
-  function updateStatus(payload){payload.actionRequestId=uuid();document.getElementById('detailContent').insertAdjacentHTML('afterbegin',`<div id="statusLoader" class="hint"><span class="spinner"></span> ${payload.newStatus==='Resolved'?'Resolving ticket…':'Starting investigation…'}</div>`);google.script.run.withSuccessHandler(t=>{toast(`Ticket moved to ${t.status}.`);renderDetail(t);TAB_CACHE.my=null;TAB_CACHE.numbers=null;updateQueueCacheTicket(t);}).withFailureHandler(err=>{document.getElementById('statusLoader')?.remove();showError(err);}).updateTicketStatus(payload);}
+  function updateStatus(payload){payload.actionRequestId=uuid();document.getElementById('detailContent').insertAdjacentHTML('afterbegin',`<div id="statusLoader" class="hint"><span class="spinner"></span> ${payload.newStatus==='Resolved'?'Resolving ticket…':'Starting investigation…'}</div>`);appRequest({method:'updateTicketStatus',payload,loaderText:'Updating ticket status…',success:t=>{toast(`Ticket moved to ${t.status}.`);renderDetail(t);invalidateTicketCaches();updateQueueCacheTicket(t);},failure:err=>{document.getElementById('statusLoader')?.remove();showError(err);}});}
 
-  function loadNumbers(refresh=false){if(!refresh&&isFresh(TAB_CACHE.numbers,CACHE_TTL.numbers)){renderNumbers(TAB_CACHE.numbers.data);return;}document.getElementById('numbers').innerHTML=loading();google.script.run.withSuccessHandler(n=>{TAB_CACHE.numbers={data:n,at:Date.now()};renderNumbers(n);}).withFailureHandler(showError).getNumbers();}
+  function loadNumbers(refresh=false){if(!refresh&&isFresh(TAB_CACHE.numbers,CACHE_TTL.numbers)){renderNumbers(TAB_CACHE.numbers.data);return;}document.getElementById('numbers').innerHTML=loading();appRequest({key:'numbers',method:'getNumbers',loaderText:'Loading SLA dashboard…',success:n=>{TAB_CACHE.numbers={data:n,at:Date.now()};renderNumbers(n);},failure:showError});}
   function renderNumbers(n){
     document.getElementById('numbers').innerHTML=`<div class="page-intro"><div class="eyebrow">Performance snapshot</div><h2>SLA Dashboard</h2><p>Track workload, overdue issues and SLA performance. Operational health across the last ${n.days} days.</p></div><div class="card"><h3>Last ${n.days} days</h3><div class="metric-grid"><div class="metric"><div class="value">${n.raised}</div><div class="label">Tickets raised</div></div><div class="metric"><div class="value">${n.resolved}</div><div class="label">Tickets resolved</div></div><div class="metric"><div class="value">${n.open}</div><div class="label">Currently open</div></div><div class="metric"><div class="value">${n.overdue}</div><div class="label">Currently overdue</div></div><div class="metric"><div class="value">${n.adherence===null?'—':n.adherence+'%'}</div><div class="label">SLA adherence of resolved tickets</div></div></div></div><div class="grid"><div class="card"><h3>Open by priority</h3>${bars(n.byPriority)}</div><div class="card"><h3>Open by status</h3>${bars(n.byStatus)}</div><div class="card full"><h3>Open by category</h3>${bars(n.byCategory)}</div><div class="card full"><h3>Open by client size</h3>${bars(n.byClientSize||[])}</div></div>`;
   }
   function bars(rows){const max=Math.max(1,...rows.map(x=>x.count));return rows.length?rows.map(x=>`<div class="bar-row"><div class="bar-name">${esc(x.name)}</div><div class="bar"><span style="width:${x.count/max*100}%"></span></div><div class="bar-count">${x.count}</div></div>`).join(''):'<div class="empty">No open tickets.</div>';}
 
   function isFresh(entry,ttl){return Boolean(entry&&Date.now()-entry.at<ttl);}
-  function invalidateTicketCaches(){TAB_CACHE.my=null;TAB_CACHE.queue.clear();TAB_CACHE.numbers=null;}
+  function invalidateTicketCaches(){TAB_CACHE.activity.clear();TAB_CACHE.queue.clear();TAB_CACHE.numbers=null;}
   function updateQueueCacheTicket(ticket){
     const queueTicket={ticketId:ticket.ticketId,createdAt:ticket.createdAt,createdAtIso:ticket.createdAtIso,clientName:ticket.clientName,categoryName:ticket.categoryName,emailSubject:ticket.emailSubject,priority:ticket.priority,status:ticket.status,slaStatus:ticket.slaStatus,slaDueAt:ticket.slaDueAt,slaDueAtIso:ticket.slaDueAtIso,raiserEmail:ticket.raiserEmail};
     TAB_CACHE.queue.forEach(entry=>{const index=entry.data.rows.findIndex(row=>row.ticketId===ticket.ticketId);if(index>=0)entry.data.rows[index]=queueTicket;entry.at=Date.now();});
@@ -364,7 +380,7 @@
   function toast(msg,error=false){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show'+(error?' error':'');setTimeout(()=>t.className='toast',4500);}
   function showError(err){toast(err?.message||String(err),true);}
   function uuid(){return globalThis.crypto?.randomUUID?.()||`req-${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;}
-  function fatal(err){document.getElementById('initialLoader').classList.add('hidden');document.querySelector('main').innerHTML=`<div class="card"><h2>Access or setup error</h2><div class="pre">${esc(err?.message||String(err))}</div></div>`;document.getElementById('userInfo').textContent='Unable to load';}
+  function fatal(err){hideGlobalLoader();document.getElementById('initialLoader').classList.add('hidden');document.querySelector('main').innerHTML=`<div class="card"><h2>Access or setup error</h2><div class="pre">${esc(err?.message||String(err))}</div></div>`;document.getElementById('userInfo').textContent='Unable to load';}
   function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
   function escAttr(v){return esc(v);}
 </script>

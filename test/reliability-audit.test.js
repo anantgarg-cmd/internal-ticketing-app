@@ -41,10 +41,10 @@ assert.deepStrictEqual(JSON.parse(JSON.stringify(result)), {
 for (const field of ['clientMode','clientId','clientName','clientType','clientSize','categoryId','emailSubject','issueDescription','duplicateOverride','duplicateIds','submissionRequestId']) {
   assert(new RegExp(`name=["']${field}["']`).test(html), `missing serializable control ${field}`);
 }
-assert(html.includes('.submitTicket(form)'));
+assert(html.includes("method:'submitTicket',payload:form"));
 assert(!/form\.elements[^\n]*disabled\s*=\s*true/.test(html));
-assert(html.includes("const restore=()=>{IN_FLIGHT.delete(requestKey)"));
-assert(html.includes("withFailureHandler(err=>{restore();showError(err);})"));
+assert(html.includes("const restore=()=>{form.removeAttribute('aria-busy')"));
+assert(html.includes("always:restore"));
 assert(html.includes("if(IN_FLIGHT.has(requestKey))return"));
 
 // Authoritative list reads must not silently hide Tickets when TicketIndex is stale.

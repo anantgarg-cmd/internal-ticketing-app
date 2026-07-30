@@ -3,7 +3,7 @@
  * Do not put passwords or the Slack webhook directly in this file.
  */
 
-const APP_RELEASE = 'ticketing-stability-v1';
+const APP_RELEASE = 'sales-tickets-search-loader-v1';
 const APP_COMMIT = '__APP_COMMIT__';
 let SPREADSHEET_INSTANCE_ = null;
 let SLA_SCHEMA_RECOVERY_FAILED_ = false;
@@ -87,6 +87,11 @@ function checkDuplicate(payload) {
   const normalizedSubject = normalizeSubject_(payload.emailSubject);
 
   const recent = getRecentTicketObjects_(cutoff, 200);
+  const roleMap = user.role === APP.ROLES.SALES ? getUserRoleMap_() : null;
+  const raiserByTicketId = user.role === APP.ROLES.SALES ? getSheetObjects_(APP.SHEETS.TICKETS).reduce((raisers, ticket) => {
+    raisers[String(ticket.Ticket_ID)] = lower_(ticket.Raiser_Email);
+    return raisers;
+  }, {}) : null;
   const matches = recent.rows
     .filter(t => buildClientKeyFromTicket_(t) === clientKey)
     .filter(t => String(t.Category_ID) === String(payload.categoryId))
@@ -94,14 +99,18 @@ function checkDuplicate(payload) {
     .filter(x => x.similarity >= threshold)
     .sort((a, b) => toDate_(b.ticket.Created_At) - toDate_(a.ticket.Created_At))
     .slice(0, 3)
-    .map(x => ({
-      ticketId: String(x.ticket.Ticket_ID),
-      createdAt: formatDateTime_(x.ticket.Created_At),
-      status: String(x.ticket.Status),
-      subject: String(x.ticket.Email_Subject),
-      similarity: Math.round(x.similarity * 100),
-      canView: user.role !== APP.ROLES.SALES || lower_(x.ticket.Raiser_Email) === user.email
-    }));
+    .map(x => {
+      const raiserEmail = user.role === APP.ROLES.SALES ? raiserByTicketId[String(x.ticket.Ticket_ID)] : '';
+      const canView = user.role !== APP.ROLES.SALES || raiserEmail === user.email || isSalesRaisedTicket_({ Raiser_Email: raiserEmail }, roleMap);
+      return {
+        ticketId: canView ? String(x.ticket.Ticket_ID) : '',
+        createdAt: canView ? formatDateTime_(x.ticket.Created_At) : '',
+        status: canView ? String(x.ticket.Status) : 'Existing ticket',
+        subject: canView ? String(x.ticket.Email_Subject) : 'A protected similar ticket already exists.',
+        similarity: Math.round(x.similarity * 100),
+        canView
+      };
+    });
 
   logPerformance_('checkDuplicate', startedAt, { rows: recent.processed });
   return { hasDuplicate: matches.length > 0, matches };
@@ -921,9 +930,34 @@ function serializeQueueTicket_(t) { const x = serializeTicket_(t); return { tick
 
 function paginate_(rows, requestedPage, requestedSize) { const pageSize=Math.min(100,Math.max(1,Math.floor(number_(requestedSize,50)))), totalRows=rows.length,totalPages=Math.max(1,Math.ceil(totalRows/pageSize)),page=Math.min(Math.max(1,Math.floor(number_(requestedPage,1))),totalPages); return { rows:rows.slice((page-1)*pageSize,page*pageSize),page,pageSize,totalRows,totalPages }; }
 
+/** Builds one request-local, case-normalized role lookup, including inactive users. */
+function getUserRoleMap_() {
+  return getSheetObjects_(APP.SHEETS.USERS).reduce((roles, row) => {
+    const email = lower_(row.Email);
+    if (email) roles[email] = String(row.Role || '').trim().toUpperCase();
+    return roles;
+  }, {});
+}
+
+function isSalesRaisedTicket_(ticket, roleMap) {
+  const email = lower_(ticket && ticket.Raiser_Email);
+  return Boolean(email && roleMap && String(roleMap[email] || '').toUpperCase() === APP.ROLES.SALES);
+}
+
+function ticketMatchesActivitySearch_(ticket, search) {
+  if (!search) return true;
+  const due = toDate_(ticket.SLA_Due_At);
+  const resolved = String(ticket.Status) === APP.STATUS.RESOLVED;
+  const slaStatus = resolved ? String(ticket.SLA_Result || '') : (due < new Date() ? 'OVERDUE' : 'ON TRACK');
+  return [ticket.Ticket_ID, ticket.Client_ID, ticket.Client_Name, ticket.Client_Type, ticket.Client_Size,
+    ticket.Category_Name, ticket.Email_Subject, ticket.Raiser_Name, ticket.Raiser_Email, ticket.Priority,
+    ticket.Status, slaStatus].some(value => lower_(value).includes(search));
+}
+
 function getMyTickets(options) {
-  const startedAt=Date.now(),user=requireUser_(),settings=getSettings_(),cutoff=new Date(Date.now()-number_(settings.RESOLVED_VISIBILITY_DAYS,10)*86400000);
-  const all=getSheetObjects_(APP.SHEETS.TICKETS), filtered=all.filter(t=>lower_(t.Raiser_Email)===user.email).filter(t=>String(t.Status)!==APP.STATUS.RESOLVED||toDate_(t.Resolved_At)>=cutoff).sort((a,b)=>toDate_(b.Created_At)-toDate_(a.Created_At));
+  const startedAt=Date.now(),user=requireUser_(),settings=getSettings_(),cutoff=new Date(Date.now()-number_(settings.RESOLVED_VISIBILITY_DAYS,10)*86400000),search=lower_(options&&options.search).trim();
+  const roleMap=user.role===APP.ROLES.SALES?getUserRoleMap_():null,all=getSheetObjects_(APP.SHEETS.TICKETS);
+  const filtered=all.filter(t=>user.role===APP.ROLES.SALES?isSalesRaisedTicket_(t,roleMap):lower_(t.Raiser_Email)===user.email).filter(t=>String(t.Status)!==APP.STATUS.RESOLVED||toDate_(t.Resolved_At)>=cutoff).filter(t=>ticketMatchesActivitySearch_(t,search)).sort((a,b)=>toDate_(b.Created_At)-toDate_(a.Created_At));
   const page=paginate_(filtered,options&&options.page,options&&options.pageSize); page.rows=page.rows.map(serializeQueueTicket_); logPerformance_('getMyTickets',startedAt,{rows:all.length}); return page;
 }
 
@@ -943,7 +977,7 @@ function getMatchingRows_(sheetName, key, value) {
 function getTicketSlaCycles_(ticketId) { try{return getMatchingRows_(APP.SHEETS.SLA_CYCLES,'Ticket_ID',ticketId).sort((a,b)=>number_(b.Cycle_Number,0)-number_(a.Cycle_Number,0));}catch(err){SLA_SCHEMA_RECOVERY_FAILED_=true;return[];} }
 
 function getTicketDetail(ticketId) {
-  const startedAt=Date.now(),user=requireUser_(),found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',ticketId); if(!found)throw new Error('Ticket not found.'); if(user.role===APP.ROLES.SALES&&lower_(found.object.Raiser_Email)!==user.email)throw new Error('You are not allowed to view this ticket.');
+  const startedAt=Date.now(),user=requireUser_(),found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',ticketId); if(user.role===APP.ROLES.SALES&&(!found||(lower_(found.object.Raiser_Email)!==user.email&&!isSalesRaisedTicket_(found.object,getUserRoleMap_()))))throw new Error('You are not allowed to view this ticket.'); if(!found)throw new Error('Ticket not found.');
   const result=serializeTicket_(found.object); result.dynamicFields=safeJsonParse_(found.object.Dynamic_Fields_JSON,{}); result.slaCycles=getTicketSlaCycles_(ticketId).map(serializeSlaCycle_); result.slaCycleNumber=result.slaCycles.reduce((m,c)=>Math.max(m,c.cycleNumber),0); result.reopenCount=result.slaCycles.filter(c=>c.cycleType==='REOPEN').length; result.canReopen=String(found.object.Status)===APP.STATUS.RESOLVED&&([APP.ROLES.POC,APP.ROLES.ADMIN].includes(user.role)||lower_(found.object.Raiser_Email)===user.email); result.events=getMatchingRows_(APP.SHEETS.EVENTS,'Ticket_ID',ticketId).sort((a,b)=>toDate_(a.Created_At)-toDate_(b.Created_At)).map(e=>({eventType:String(e.Event_Type),oldValue:String(e.Old_Value||''),newValue:String(e.New_Value||''),performedBy:String(e.Performed_By||''),createdAt:formatDateTime_(e.Created_At),note:String(e.Note||'')})); logPerformance_('getTicketDetail',startedAt,{rows:1}); return result;
 }
 
