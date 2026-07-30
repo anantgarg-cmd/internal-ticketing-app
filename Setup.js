@@ -21,11 +21,11 @@ const APP = Object.freeze({
   STATUS: Object.freeze({ RAISED: 'Raised', REOPENED: 'Reopened', INVESTIGATING: 'Investigating', RESOLVED: 'Resolved' }),
   HEADERS: Object.freeze({
     Tickets: [
-      'Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_Mode','Client_ID','Client_Name','Client_Type','Client_Size',
+      'Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_Mode','Client_ID','Client_Name','Client_Type',
       'Category_ID','Category_Name','Email_Subject','Normalized_Subject','Issue_Description','Priority','SLA_Hours',
       'SLA_Due_At','Status','Picked_Up_By','Picked_Up_At','Investigating_At','Resolution_Note','Root_Cause',
       'Resolved_By','Resolved_At','SLA_Result','Duplicate_Of','Duplicate_Override','Dynamic_Fields_JSON',
-      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Priority_Source','Submission_Request_ID'
+      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Client_Size','Priority_Source','Submission_Request_ID'
     ],
     Clients: ['Client_ID','Client_Name','Client_Type','Active'],
     Categories: ['Category_ID','Client_Type','Category_Name','Priority','SLA_Hours','Fields_JSON','Required_Fields_JSON','Active'],
@@ -41,6 +41,13 @@ const APP = Object.freeze({
   })
 });
 
+const CURRENT_SCHEMA_VERSION = 5;
+const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
+const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v5';
+const SCHEMA_UPGRADE_IN_PROGRESS_ = 'SCHEMA_UPGRADE_IN_PROGRESS';
+const SCHEMA_TEMPORARY_MESSAGE_ = 'The application structure is being upgraded. Please refresh once after a few seconds.';
+const SCHEMA_ADMIN_MESSAGE_ = 'The application structure could not be prepared automatically. Please ask the administrator to run repairApplicationSchema() from Apps Script.';
+
 function setupSystem() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new Error('Open the Google Sheet first, then go to Extensions → Apps Script and run setupSystem().');
@@ -48,16 +55,15 @@ function setupSystem() {
   ss.setSpreadsheetTimeZone(APP.TZ);
   PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
 
-  Object.keys(APP.SHEETS).forEach(key => {
-    const sheetName = APP.SHEETS[key];
-    ensureSheet_(ss, sheetName, APP.HEADERS[sheetName]);
-  });
+  runSchemaMigrations_(0, CURRENT_SCHEMA_VERSION, ss, newSchemaSummary_());
 
   seedSettings_(ss);
   seedCategories_(ss);
   seedClientSizePriority_(ss);
   seedAdminUser_(ss);
   formatSheets_(ss);
+  PropertiesService.getScriptProperties().setProperty(APP_SCHEMA_VERSION_PROPERTY_, String(CURRENT_SCHEMA_VERSION));
+  invalidateSchemaCaches_();
 
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ATTACHMENT_FOLDER_ID')) {
@@ -167,123 +173,246 @@ function clientSizePrioritySeedRows_() {
 
 function seedClientSizePriority_(ss) {
   const sheet = ss.getSheetByName(APP.SHEETS.CLIENT_SIZE_PRIORITY);
-  const headers = APP.HEADERS.ClientSizePriority;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(String);
   const existing = sheet.getLastRow() < 2 ? [] : sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
   const codeColumn = headers.indexOf('Client_Size_Code');
   const codes = existing.map(row => String(row[codeColumn] || ''));
   const missing = clientSizePrioritySeedRows_().filter(row => codes.indexOf(row[0]) < 0);
-  if (missing.length) sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, headers.length).setValues(missing);
+  if (missing.length) {
+    const canonical = APP.HEADERS.ClientSizePriority;
+    sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, headers.length)
+      .setValues(missing.map(seed => headers.map(header => seed[canonical.indexOf(header)] === undefined ? '' : seed[canonical.indexOf(header)])));
+  }
   return missing.map(row => row[0]);
 }
 
 function formatSheets_(ss) {
   Object.values(APP.SHEETS).forEach(sheetName => {
     const sheet = ss.getSheetByName(sheetName);
+    if (!sheet || !sheet.getLastColumn()) return;
     const lastCol = sheet.getLastColumn();
-    if (!lastCol) return;
-    sheet.getRange(1, 1, 1, lastCol)
-      .setFontWeight('bold')
-      .setBackground('#1f2937')
-      .setFontColor('#ffffff')
-      .setWrap(true);
-    sheet.autoResizeColumns(1, lastCol);
-    sheet.setRowHeight(1, 32);
+    sheet.getRange(1, 1, 1, lastCol).setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff').setWrap(true);
+    sheet.setFrozenRows(1); sheet.setRowHeight(1, 32); sheet.autoResizeColumns(1, lastCol);
   });
-
-  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.TICKETS),
-    ['Created_At','SLA_Due_At','Picked_Up_At','Investigating_At','Resolved_At','Updated_At']);
+  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.TICKETS), ['Created_At','SLA_Due_At','Picked_Up_At','Investigating_At','Resolved_At','Updated_At']);
   formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.EVENTS), ['Created_At']);
-  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.SLA_CYCLES),
-    ['Started_At','Due_At','Ended_At','Created_At','Updated_At']);
+  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.SLA_CYCLES), ['Started_At','Due_At','Ended_At','Created_At','Updated_At']);
+  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.TICKET_INDEX), ['Created_At','SLA_Due_At','Resolved_At','Updated_At']);
 }
 
 function formatDateTimeColumns_(sheet, headerNames) {
   if (!sheet || !sheet.getLastColumn()) return;
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(String);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(value => String(value).trim());
   headerNames.forEach(header => {
     const column = headers.indexOf(header) + 1;
     if (column) sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1).setNumberFormat('dd-mmm-yyyy hh:mm');
   });
 }
 
-function formatSlaCycleSheet_(sheet) {
-  const lastColumn = sheet.getLastColumn();
-  sheet.setFrozenRows(1);
-  if (lastColumn) {
-    sheet.getRange(1, 1, 1, lastColumn).setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff').setWrap(true);
-    sheet.setRowHeight(1, 32);
-    sheet.autoResizeColumns(1, lastColumn);
-  }
-  formatDateTimeColumns_(sheet, ['Started_At','Due_At','Ended_At','Created_At','Updated_At']);
+function newSchemaSummary_() {
+  return { success: true, schemaVersion: CURRENT_SCHEMA_VERSION, sheetsCreated: [], columnsAdded: {}, configurationRowsSeeded: {}, ticketIndexRowsCreated: 0, warnings: [] };
 }
 
-/** Additive, idempotent schema repair. The optional argument is for callers already holding ScriptLock. */
-function ensureTicketSlaCyclesSchema_(lockAlreadyHeld) {
-  const ss = getSpreadsheet_();
-  const headers = APP.HEADERS.TicketSLACycles;
-  let sheet = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
-  let lock = null;
-  let sheetCreated = false;
-  const columnsAdded = [];
-  if (!lockAlreadyHeld) {
-    lock = LockService.getScriptLock();
-    lock.waitLock(30000);
+/** Create a missing sheet/header and append absent columns without moving data. */
+function ensureSheetSchema_(spreadsheet, sheetName, expectedHeaders, summary) {
+  let sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(sheetName);
+    if (summary) summary.sheetsCreated.push(sheetName);
+  }
+  const added = appendMissingColumns_(sheet, expectedHeaders);
+  if (summary && added.length) summary.columnsAdded[sheetName] = (summary.columnsAdded[sheetName] || []).concat(added);
+  return sheet;
+}
+
+function appendMissingColumns_(sheet, expectedHeaders) {
+  const width = sheet.getLastColumn();
+  const existing = width ? sheet.getRange(1, 1, 1, width).getDisplayValues()[0].map(value => String(value).trim()) : [];
+  const missing = expectedHeaders.filter(header => existing.indexOf(header) < 0);
+  if (missing.length) sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
+  return missing;
+}
+
+function seedMissingConfigurationRows_(spreadsheet, summary) {
+  const seeded = seedClientSizePriority_(spreadsheet);
+  if (summary) summary.configurationRowsSeeded.ClientSizePriority = seeded;
+  return seeded;
+}
+
+/** Every migration is additive and can safely repair a partially/manual migration. */
+function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
+  const ss = spreadsheet || getSpreadsheet_();
+  const report = summary || newSchemaSummary_();
+  const ensure = names => names.forEach(name => ensureSheetSchema_(ss, name, APP.HEADERS[name], report));
+  if (fromVersion < 1 && toVersion >= 1) ensure([APP.SHEETS.TICKETS, APP.SHEETS.CLIENTS, APP.SHEETS.CATEGORIES, APP.SHEETS.USERS, APP.SHEETS.EVENTS, APP.SHEETS.SETTINGS]);
+  if (fromVersion < 2 && toVersion >= 2) ensure([APP.SHEETS.SLA_CYCLES]);
+  if (fromVersion < 3 && toVersion >= 3) { ensure([APP.SHEETS.CLIENT_SIZE_PRIORITY, APP.SHEETS.TICKETS]); seedMissingConfigurationRows_(ss, report); }
+  if (fromVersion < 4 && toVersion >= 4) ensure([APP.SHEETS.TICKET_INDEX, APP.SHEETS.TICKETS, APP.SHEETS.EVENTS]);
+  // Migration 5 deliberately rechecks the complete contract. This also makes
+  // repair safe where a tab/column was manually created during an older release.
+  if (toVersion >= 5) { ensure(Object.values(APP.SHEETS)); seedMissingConfigurationRows_(ss, report); formatSheets_(ss); }
+  const indexResult = backfillTicketIndexIfNeeded_(ss);
+  report.ticketIndexRowsCreated += indexResult.created;
+  if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');
+  return { summary: report, indexComplete: indexResult.complete };
+}
+
+function schemaNamesReady_(spreadsheet) {
+  const present = {};
+  spreadsheet.getSheets().forEach(sheet => { present[sheet.getName()] = true; });
+  return Object.values(APP.SHEETS).every(name => present[name]);
+}
+
+/** Fast startup guard: one sheet-name read plus the durable version property. */
+function ensureRuntimeSchema_() {
+  const startedAt = Date.now(), ss = getSpreadsheet_(), props = PropertiesService.getScriptProperties();
+  const version = Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_) || 0);
+  // Cache is only a hint: required names are still checked so manual deletion is detected.
+  let cachedReady = false;
+  try { cachedReady = CacheService.getScriptCache().get(SCHEMA_READY_CACHE_KEY_) === '1'; } catch (cacheError) {}
+  const namesReady = schemaNamesReady_(ss);
+  if (version === CURRENT_SCHEMA_VERSION && namesReady) {
+    if (!cachedReady) try { CacheService.getScriptCache().put(SCHEMA_READY_CACHE_KEY_, '1', 300); } catch (cacheError) {}
+    return { ready: true, checked: false };
+  }
+  const lock = LockService.getScriptLock(), waitStarted = Date.now();
+  if (!lock.tryLock(3000)) {
+    console.log(JSON.stringify({ functionName: 'ensureRuntimeSchema', durationMs: Date.now() - startedAt, lockWaitMs: Date.now() - waitStarted, status: 'busy' }));
+    const busy = new Error(SCHEMA_UPGRADE_IN_PROGRESS_ + ': ' + SCHEMA_TEMPORARY_MESSAGE_); busy.code = SCHEMA_UPGRADE_IN_PROGRESS_; throw busy;
   }
   try {
-    sheet = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
-    if (!sheet) {
-      sheet = ss.insertSheet(APP.SHEETS.SLA_CYCLES);
-      sheetCreated = true;
+    const current = Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_) || 0);
+    if (current === CURRENT_SCHEMA_VERSION && schemaNamesReady_(ss)) return { ready: true, checked: false };
+    const result = runSchemaMigrations_(current, CURRENT_SCHEMA_VERSION, ss, newSchemaSummary_());
+    const validation = validateCompleteSchema_(ss);
+    if (!validation.ready || !result.indexComplete) {
+      const pending = new Error(SCHEMA_UPGRADE_IN_PROGRESS_ + ': ' + SCHEMA_TEMPORARY_MESSAGE_); pending.code = SCHEMA_UPGRADE_IN_PROGRESS_; throw pending;
     }
-    const existing = sheet.getLastColumn()
-      ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(value => String(value).trim())
-      : [];
-    const populated = existing.filter(Boolean);
-    const missing = headers.filter(header => populated.indexOf(header) < 0);
-    if (missing.length) {
-      const startColumn = existing.length + 1;
-      sheet.getRange(1, startColumn, 1, missing.length).setValues([missing]);
-      Array.prototype.push.apply(columnsAdded, missing);
-    }
-    formatSlaCycleSheet_(sheet);
-    return { sheetCreated, columnsAdded, ready: true };
-  } finally {
-    if (lock) lock.releaseLock();
-  }
-}
-
-/** Safe public upgrade for legacy installations; never clears or rebuilds source sheets. */
-function upgradeSlaCycleSchema() {
-  const result = ensureTicketSlaCyclesSchema_();
-  return { success: true, ready: result.ready, sheetCreated: result.sheetCreated, columnsAdded: result.columnsAdded,
-    message: result.sheetCreated ? 'TicketSLACycles was created.' : (result.columnsAdded.length ? 'Missing SLA-cycle columns were appended.' : 'TicketSLACycles was already ready.') };
-}
-
-/** Complete additive upgrade entry point retained for deployment runbooks. */
-function upgradeClientSizeAndPerformanceSchema() {
-  const user = requireRole_([APP.ROLES.ADMIN]);
-  const ss = getSpreadsheet_();
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  const createdSheets = [], columnsAdded = {};
-  try {
-    [APP.SHEETS.CLIENT_SIZE_PRIORITY, APP.SHEETS.TICKET_INDEX].forEach(name => {
-      if (!ss.getSheetByName(name)) createdSheets.push(name);
-      ensureSheet_(ss, name, APP.HEADERS[name]);
-    });
-    [[APP.SHEETS.TICKETS, ['Client_Size','Priority_Source','Submission_Request_ID']], [APP.SHEETS.EVENTS, ['Request_ID']]].forEach(spec => {
-      const sheet = ss.getSheetByName(spec[0]);
-      const current = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(String);
-      const missing = spec[1].filter(header => current.indexOf(header) < 0);
-      if (missing.length) sheet.getRange(1, current.length + 1, 1, missing.length).setValues([missing]);
-      columnsAdded[spec[0]] = missing;
-    });
+    props.setProperty(APP_SCHEMA_VERSION_PROPERTY_, String(CURRENT_SCHEMA_VERSION));
+    invalidateSchemaCaches_();
+    console.log(JSON.stringify({ functionName: 'ensureRuntimeSchema', durationMs: Date.now() - startedAt, lockWaitMs: Date.now() - waitStarted, status: 'repaired' }));
+    return { ready: true, checked: true };
+  } catch (error) {
+    if (error && error.code === SCHEMA_UPGRADE_IN_PROGRESS_) throw error;
+    console.error('Application schema repair failed: ' + String(error && error.message || error));
+    throw new Error(SCHEMA_ADMIN_MESSAGE_);
   } finally { lock.releaseLock(); }
-  const seededClientSizes = seedClientSizePriority_(ss);
-  const slaCycles = ensureTicketSlaCyclesSchema_();
-  const index = rebuildTicketIndex_(true);
-  invalidateApplicationCaches_();
-  formatSheets_(ss);
-  return { success: true, runByRole: user.role, createdSheets, columnsAdded, seededClientSizes, indexedTickets: index.indexed, slaCycles,
-    message: 'Additive upgrade complete. Source and historical rows were not cleared, moved, or reprioritised.' };
 }
+
+function getRequiredSheet_(sheetName) {
+  let sheet = getSpreadsheet_().getSheetByName(sheetName);
+  if (sheet) return sheet;
+  try { ensureRuntimeSchema_(); } catch (error) {
+    if (error && (error.code === SCHEMA_UPGRADE_IN_PROGRESS_ || String(error.message).indexOf(SCHEMA_TEMPORARY_MESSAGE_) >= 0)) throw error;
+    console.error('Required application sheet could not be prepared: ' + String(sheetName));
+    throw new Error(SCHEMA_ADMIN_MESSAGE_);
+  }
+  sheet = getSpreadsheet_().getSheetByName(sheetName);
+  if (!sheet) { console.error('Required application sheet remains unavailable: ' + String(sheetName)); throw new Error(SCHEMA_ADMIN_MESSAGE_); }
+  return sheet;
+}
+
+function validateCompleteSchema_(spreadsheet) {
+  const ss = spreadsheet || getSpreadsheet_(), missingSheets = [], missingColumns = {};
+  Object.values(APP.SHEETS).forEach(name => {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) { missingSheets.push(name); return; }
+    const headers = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(value => String(value).trim()) : [];
+    const missing = APP.HEADERS[name].filter(header => headers.indexOf(header) < 0);
+    if (missing.length) missingColumns[name] = missing;
+  });
+  return { ready: !missingSheets.length && !Object.keys(missingColumns).length, missingSheets, missingColumns };
+}
+
+function validateApplicationSchema() {
+  const ss = getSpreadsheet_(), validation = validateCompleteSchema_(ss), props = PropertiesService.getScriptProperties();
+  const sizeSheet = ss.getSheetByName(APP.SHEETS.CLIENT_SIZE_PRIORITY), codes = {};
+  if (sizeSheet && sizeSheet.getLastRow() > 1) {
+    const headers = sizeSheet.getRange(1, 1, 1, sizeSheet.getLastColumn()).getDisplayValues()[0].map(String), codeIndex = headers.indexOf('Client_Size_Code');
+    sizeSheet.getRange(2, 1, sizeSheet.getLastRow() - 1, sizeSheet.getLastColumn()).getValues().forEach(row => { codes[String(row[codeIndex])] = true; });
+  }
+  const requiredCodes = clientSizePrioritySeedRows_().map(row => row[0]);
+  return {
+    schemaVersion: Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_) || 0), requiredSheetsPresent: Object.values(APP.SHEETS).filter(name => validation.missingSheets.indexOf(name) < 0),
+    requiredSheetsMissing: validation.missingSheets, missingColumns: validation.missingColumns,
+    clientSizeSeedRowsPresent: requiredCodes.filter(code => codes[code]), clientSizeSeedRowsMissing: requiredCodes.filter(code => !codes[code]),
+    ticketIndexRowCount: safeDataRowCount_(ss.getSheetByName(APP.SHEETS.TICKET_INDEX)), ticketsRowCount: safeDataRowCount_(ss.getSheetByName(APP.SHEETS.TICKETS)),
+    cachesInvalidated: false, schemaReady: validation.ready && Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_)) === CURRENT_SCHEMA_VERSION
+  };
+}
+
+function safeDataRowCount_(sheet) { return sheet ? Math.max(0, sheet.getLastRow() - 1) : 0; }
+
+function repairApplicationSchema() {
+  const ss = getSpreadsheet_(), props = PropertiesService.getScriptProperties(), lock = LockService.getScriptLock(), wait = Date.now(), summary = newSchemaSummary_();
+  lock.waitLock(10000);
+  try {
+    const from = Number(props.getProperty(APP_SCHEMA_VERSION_PROPERTY_) || 0);
+    const result = runSchemaMigrations_(from, CURRENT_SCHEMA_VERSION, ss, summary);
+    const validation = validateCompleteSchema_(ss);
+    if (!validation.ready || !result.indexComplete) throw new Error('Schema or TicketIndex validation is not complete. Retry after the continuation finishes.');
+    props.setProperty(APP_SCHEMA_VERSION_PROPERTY_, String(CURRENT_SCHEMA_VERSION));
+    invalidateSchemaCaches_();
+    console.log(JSON.stringify({ functionName: 'repairApplicationSchema', durationMs: Date.now() - wait, lockWaitMs: Date.now() - wait }));
+    return summary;
+  } catch (error) { console.error('Administrator schema repair failed: ' + String(error && error.message || error)); summary.success = false; summary.warnings.push(SCHEMA_ADMIN_MESSAGE_); return summary; }
+  finally { lock.releaseLock(); }
+}
+
+function backfillTicketIndexIfNeeded_(ss) {
+  const source = ss.getSheetByName(APP.SHEETS.TICKETS), target = ss.getSheetByName(APP.SHEETS.TICKET_INDEX);
+  if (!source || !target || target.getLastRow() > 1 || source.getLastRow() < 2) return { created: 0, complete: true };
+  return continueTicketIndexBackfill_(ss);
+}
+
+function continueTicketIndexBackfill_(spreadsheet) {
+  const ss = spreadsheet || getSpreadsheet_(), props = PropertiesService.getScriptProperties(), source = ss.getSheetByName(APP.SHEETS.TICKETS), target = ss.getSheetByName(APP.SHEETS.TICKET_INDEX);
+  const sourceHeaders = source.getRange(1, 1, 1, source.getLastColumn()).getDisplayValues()[0].map(String), targetHeaders = target.getRange(1, 1, 1, target.getLastColumn()).getDisplayValues()[0].map(String);
+  let nextRow = Number(props.getProperty('TICKET_INDEX_BACKFILL_NEXT_ROW') || 2);
+  // If another completed index exists, never duplicate it merely because progress is stale.
+  if (target.getLastRow() > 1 && nextRow === 2) return { created: 0, complete: true };
+  const count = Math.min(1000, Math.max(0, source.getLastRow() - nextRow + 1));
+  if (count) {
+    const values = source.getRange(nextRow, 1, count, sourceHeaders.length).getValues();
+    const rows = values.map(row => { const ticket = sourceHeaders.reduce((object, header, i) => { object[header] = row[i]; return object; }, {}); const item = ticketToIndex_(ticket); return targetHeaders.map(header => item[header] === undefined ? '' : item[header]); });
+    target.getRange(target.getLastRow() + 1, 1, rows.length, targetHeaders.length).setValues(rows); nextRow += count;
+  }
+  const complete = nextRow > source.getLastRow();
+  if (complete) props.deleteProperty('TICKET_INDEX_BACKFILL_NEXT_ROW');
+  else { props.setProperty('TICKET_INDEX_BACKFILL_NEXT_ROW', String(nextRow)); scheduleTicketIndexContinuation_(); }
+  return { created: count, complete };
+}
+
+function scheduleTicketIndexContinuation_() {
+  const exists = ScriptApp.getProjectTriggers().some(trigger => trigger.getHandlerFunction() === 'continueTicketIndexBackfill');
+  if (!exists) ScriptApp.newTrigger('continueTicketIndexBackfill').timeBased().after(60 * 1000).create();
+}
+
+function continueTicketIndexBackfill() {
+  const lock = LockService.getScriptLock(); if (!lock.tryLock(5000)) return { complete: false };
+  try {
+    const result = continueTicketIndexBackfill_(getSpreadsheet_());
+    if (result.complete) {
+      PropertiesService.getScriptProperties().setProperty(APP_SCHEMA_VERSION_PROPERTY_, String(CURRENT_SCHEMA_VERSION));
+      ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction() === 'continueTicketIndexBackfill').forEach(trigger => ScriptApp.deleteTrigger(trigger));
+      invalidateSchemaCaches_();
+    }
+    return result;
+  } finally { lock.releaseLock(); }
+}
+
+function invalidateSchemaCaches_() {
+  try { CacheService.getScriptCache().removeAll([SCHEMA_READY_CACHE_KEY_, 'app:settings:v2', 'app:categories:v2', 'app:client-size-priority:v1', 'app:numbers:v2']); } catch (error) { console.warn('Schema cache invalidation was unavailable.'); }
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('Internal Ticketing Admin')
+    .addItem('Repair / Upgrade Application Structure', 'repairApplicationSchema')
+    .addItem('Validate Application Structure', 'validateApplicationSchema')
+    .addItem('Rebuild Ticket Index', 'rebuildTicketIndex')
+    .addToUi();
+}
+
+/** Backward-compatible upgrade names now use the complete generic repair. */
+function upgradeSlaCycleSchema() { return repairApplicationSchema(); }
+function upgradeClientSizeAndPerformanceSchema() { return repairApplicationSchema(); }
