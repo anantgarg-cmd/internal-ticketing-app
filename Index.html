@@ -88,7 +88,7 @@
           <div><label for="clientId" id="clientIdLabel" class="required">Client ID</label><input id="clientId" name="clientId" type="text" inputmode="numeric" maxlength="20" placeholder="Enter the numeric client ID" required><div class="hint" id="clientIdHint"></div></div>
           <div><label for="clientName" class="required">Client name</label><input id="clientName" name="clientName" type="text" maxlength="200" placeholder="Enter the client or brand name" required></div>
           <div><label for="clientType" class="required">Client type</label><select id="clientType" name="clientType" required><option value="">Select type</option><option>360</option><option>Regular</option></select></div>
-          <div id="clientSizeField" style="display:none"><label for="clientSize" class="required">Client Size</label><select id="clientSize" name="clientSize"><option value="">Select client size</option></select><div class="hint">Priority is determined by this selection.</div></div><div><label for="categoryId" class="required">Category</label><select id="categoryId" name="categoryId"><option value="">Select category</option></select></div>
+          <div id="clientSizeField" style="display:none"><label for="clientSize" class="required">Client Size</label><select id="clientSize" name="clientSize"><option value="">Select client size</option></select><div class="hint">Priority and SLA are determined by this selection.</div></div><div><label for="categoryId" class="required">Category</label><select id="categoryId" name="categoryId"><option value="">Select category</option></select></div>
         </div></section>
         <section class="form-section"><div class="section-heading"><span class="section-number">2</span><div><h3>Issue details</h3><p>Explain the issue clearly and add the identifiers needed to investigate.</p></div></div><div class="grid">
           <div class="full"><label for="emailSubject" class="required">Email subject</label><input id="emailSubject" name="emailSubject" maxlength="300" placeholder="Paste the email subject"><div class="hint">Used with client and category for the duplicate check.</div></div>
@@ -96,7 +96,7 @@
           <div id="dynamicFields" class="full grid"></div>
         </div></section>
         <section class="form-section"><div class="section-heading"><span class="section-number">3</span><div><h3>Evidence</h3><p>Add supporting files when the selected category requires evidence.</p></div></div><div id="evidenceFields"></div><div class="hint">Supported formats: PNG, JPG, PDF, TXT, JSON and ZIP. Maximum file size is controlled in Settings.</div></section>
-        <section class="form-section"><div class="section-heading"><span class="section-number">4</span><div><h3>Priority and SLA</h3><p>These commitments are calculated automatically from the selected category.</p></div></div><div id="priorityExplanation" class="hint"></div><div id="slaSummary" style="display:none"><div class="summary"><div><b>Priority</b><span id="summaryPriority"></span></div><div><b>Resolution SLA</b><span id="summarySla"></span></div><div><b>Approx. due time</b><span id="summaryDue"></span></div></div></div></section>
+        <section class="form-section"><div class="section-heading"><span class="section-number">4</span><div><h3>Priority and SLA</h3><p>These commitments are calculated automatically.</p></div></div><div id="priorityExplanation" class="hint"></div><div id="slaSummary" style="display:none"><div class="summary"><div><b>Priority</b><span id="summaryPriority"></span></div><div><b>Resolution SLA</b><span id="summarySla"></span></div><div><b>Approx. due time</b><span id="summaryDue"></span></div></div></div></section>
         <input type="hidden" name="duplicateOverride" id="duplicateOverride" value="false">
         <input type="hidden" name="duplicateIds" id="duplicateIds" value="">
         <div class="actions"><button class="btn btn-primary" id="submitBtn" type="submit">Check and raise ticket</button></div>
@@ -261,10 +261,11 @@
       else input=`<input type="${type}" name="${key}" placeholder="${escAttr(placeholder)}" ${required?'required':''}>`;
       (type==='file'?evidenceBox:box).insertAdjacentHTML('beforeend',`<div class="${type==='textarea'?'full':''}"><label class="${required?'required':''}">${esc(label)}</label>${input}</div>`);
     });
-    const size=BOOT.clientSizes.find(x=>x.code===document.getElementById('clientSize').value); document.getElementById('summaryPriority').textContent=selectedClientType()==='360'?(size?.priority||'Select Client Size'):cat.priority; document.getElementById('priorityExplanation').textContent=selectedClientType()==='360'?'For 360 clients, priority is based on client size. SLA is based on the selected issue category.':'For Regular clients, priority and SLA are based on the selected category.'; document.getElementById('summarySla').textContent=`${cat.slaHours} hours`;
+    const is360=selectedClientType()==='360',size=BOOT.clientSizes.find(x=>x.code===document.getElementById('clientSize').value); document.getElementById('summaryPriority').textContent=is360?(size?.priority||'Select Client Size'):cat.priority; document.getElementById('priorityExplanation').textContent=is360?'For 360 clients, priority and SLA are based on client size.':'For Regular clients, priority and SLA are based on the selected category.'; document.getElementById('summarySla').textContent=is360?(size?`${size.slaHours} hours`:'Select Client Size'):`${cat.slaHours} hours`;
     const due=document.getElementById('summaryDue'); due.textContent='Calculating…'; document.getElementById('slaSummary').style.display='block';
-    const categoryId=cat.id;
-    google.script.run.withSuccessHandler(result=>{if(document.getElementById('categoryId').value===categoryId)due.textContent=result.dueAt;}).withFailureHandler(err=>{if(document.getElementById('categoryId').value===categoryId){due.textContent='Unavailable';showError(err);}}).getSlaDuePreview(categoryId);
+    const categoryId=cat.id,sizeCode=is360?(size?.code||''):'';
+    if(is360&&!sizeCode){due.textContent='Select Client Size';return;}
+    google.script.run.withSuccessHandler(result=>{if(document.getElementById('categoryId').value===categoryId&&(!is360||document.getElementById('clientSize').value===sizeCode))due.textContent=result.dueAt;}).withFailureHandler(err=>{if(document.getElementById('categoryId').value===categoryId){due.textContent='Unavailable';showError(err);}}).getSlaDuePreview(categoryId,sizeCode);
   }
 
   function beginSubmit(e){

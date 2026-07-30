@@ -219,12 +219,13 @@ function submitTicket(form) {
 }
 
 /** Returns a server-calculated SLA estimate for the Raise Ticket form. */
-function getSlaDuePreview(categoryId) {
+function getSlaDuePreview(categoryId, clientSizeCode) {
   requireUser_();
   const category = getCategoryById_(categoryId);
   if (!category) throw new Error('The selected category is no longer active. Refresh the page and choose again.');
-  const dueAt = calculateWorkingSlaDueAt_(new Date(), number_(category.SLA_Hours, 24));
-  return { dueAt: formatDateTime_(dueAt), dueAtIso: dueAt.toISOString() };
+  const resolution = resolveTicketPriority_(category.Client_Type, clientSizeCode, category);
+  const dueAt = calculateWorkingSlaDueAt_(new Date(), resolution.slaHours);
+  return { dueAt: formatDateTime_(dueAt), dueAtIso: dueAt.toISOString(), priority: resolution.priority, slaHours: resolution.slaHours };
 }
 
 function getMyTickets() {
@@ -1324,7 +1325,7 @@ function getActiveClientSizePriorities_() {
   const rows = getSheetObjects_(APP.SHEETS.CLIENT_SIZE_PRIORITY).filter(row => truthy_(row.Active)).map(row => ({
     code: String(row.Client_Size_Code), label: String(row.Display_Label), adlDescription: String(row.ADL_Description),
     minAdl: number_(row.Min_ADL, 0), maxAdl: row.Max_ADL === '' ? null : number_(row.Max_ADL, null),
-    priority: String(row.Priority).toUpperCase(), sortOrder: number_(row.Sort_Order, 999)
+    priority: String(row.Priority).toUpperCase(), slaHours: number_(row.SLA_Hours, 0), sortOrder: number_(row.Sort_Order, 999)
   })).sort((a, b) => a.sortOrder - b.sortOrder);
   putCachedJson_(CACHE_KEYS_.CLIENT_SIZES, rows, 300);
   return rows;
@@ -1335,9 +1336,10 @@ function resolveTicketPriority_(clientType, clientSizeCode, category) {
     const size = getActiveClientSizePriorities_().find(row => row.code === String(clientSizeCode || ''));
     if (!size) throw new Error('Choose an active Client Size for a 360 client.');
     if (!['CRITICAL','HIGH','MEDIUM','LOW'].includes(size.priority)) throw new Error('The selected Client Size has an invalid configured priority.');
-    return { clientSize: size.code, priority: size.priority, prioritySource: 'CLIENT_SIZE' };
+    if (!(size.slaHours > 0)) throw new Error('The selected Client Size has invalid configured SLA hours.');
+    return { clientSize: size.code, priority: size.priority, prioritySource: 'CLIENT_SIZE', slaHours: size.slaHours, slaSource: 'CLIENT_SIZE' };
   }
-  return { clientSize: '', priority: String(category.Priority).toUpperCase(), prioritySource: 'CATEGORY' };
+  return { clientSize: '', priority: String(category.Priority).toUpperCase(), prioritySource: 'CATEGORY', slaHours: number_(category.SLA_Hours, 24), slaSource: 'CATEGORY' };
 }
 
 function buildBootstrap_(user) {
@@ -1394,7 +1396,7 @@ function serializeTicket_(t) {
     raiserEmail: String(t.Raiser_Email), raiserName: String(t.Raiser_Name || ''), clientId: String(t.Client_ID || ''), clientName: String(t.Client_Name || ''),
     clientType: String(t.Client_Type || ''), clientSize: String(t.Client_Size || ''), clientMode: String(t.Client_Mode || ''), categoryId: String(t.Category_ID || ''),
     categoryName: String(t.Category_Name || ''), emailSubject: String(t.Email_Subject || ''), issueDescription: String(t.Issue_Description || ''),
-    priority: String(t.Priority || ''), prioritySource: String(t.Priority_Source || ''), slaHours: number_(t.SLA_Hours, 0), slaDueAt: formatDateTime_(t.SLA_Due_At),
+    priority: String(t.Priority || ''), prioritySource: String(t.Priority_Source || ''), slaHours: number_(t.SLA_Hours, 0), slaSource: String(t.SLA_Source || ''), slaDueAt: formatDateTime_(t.SLA_Due_At),
     slaDueAtIso: due.toISOString(), slaStatus: resolved ? String(t.SLA_Result || '') : (due < new Date() ? 'OVERDUE' : 'ON TRACK'), status: String(t.Status || ''),
     pickedUpBy: String(t.Picked_Up_By || ''), pickedUpAt: formatDateTimeOptional_(t.Picked_Up_At), investigatingAt: formatDateTimeOptional_(t.Investigating_At),
     resolutionNote: String(t.Resolution_Note || ''), rootCause: String(t.Root_Cause || ''), resolvedBy: String(t.Resolved_By || ''), resolvedAt: formatDateTimeOptional_(t.Resolved_At),
@@ -1450,8 +1452,8 @@ function submitTicket(form) {
   const category=getCategoryById_(form.categoryId);if(!category)throw new Error('The selected category is no longer active.');const client=resolveClient_(form,category.Client_Type);validateTicketForm_(form,category,client);const resolution=resolveTicketPriority_(client.type,form.clientSize,category);
   let ticketId,lock=LockService.getScriptLock(),lockStarted=Date.now();lock.waitLock(10000);try{ticketId=nextTicketId_();}finally{lock.releaseLock();}const lockWaitMs=Date.now()-lockStarted;
   let attachment={id:'',name:'',url:''};try{attachment=saveAttachment_(form.attachment,ticketId,user.email);}catch(err){throw err;}
-  const createdAt=new Date(),slaHours=number_(category.SLA_Hours,24),slaDueAt=calculateWorkingSlaDueAt_(createdAt,slaHours),subject=cleanText_(form.emailSubject,300);
-  const ticket={Ticket_ID:ticketId,Created_At:createdAt,Raiser_Email:user.email,Raiser_Name:user.name,Client_Mode:client.mode,Client_ID:client.id,Client_Name:client.name,Client_Type:client.type,Client_Size:resolution.clientSize,Category_ID:category.Category_ID,Category_Name:category.Category_Name,Email_Subject:subject,Normalized_Subject:normalizeSubject_(subject),Issue_Description:cleanText_(form.issueDescription,5000),Priority:resolution.priority,Priority_Source:resolution.prioritySource,SLA_Hours:slaHours,SLA_Due_At:slaDueAt,Status:APP.STATUS.RAISED,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',SLA_Result:'ON TRACK',Duplicate_Of:cleanText_(form.duplicateIds||'',500),Duplicate_Override:String(form.duplicateOverride||'').toLowerCase()==='true',Dynamic_Fields_JSON:JSON.stringify(extractDynamicFields_(form,category)),Attachment_File_ID:attachment.id,Attachment_File_Name:attachment.name,Attachment_URL:attachment.url,Updated_At:createdAt,Updated_By:user.email,Submission_Request_ID:requestId,Current_SLA_Cycle:1};
+  const createdAt=new Date(),slaHours=resolution.slaHours,slaDueAt=calculateWorkingSlaDueAt_(createdAt,slaHours),subject=cleanText_(form.emailSubject,300);
+  const ticket={Ticket_ID:ticketId,Created_At:createdAt,Raiser_Email:user.email,Raiser_Name:user.name,Client_Mode:client.mode,Client_ID:client.id,Client_Name:client.name,Client_Type:client.type,Client_Size:resolution.clientSize,Category_ID:category.Category_ID,Category_Name:category.Category_Name,Email_Subject:subject,Normalized_Subject:normalizeSubject_(subject),Issue_Description:cleanText_(form.issueDescription,5000),Priority:resolution.priority,Priority_Source:resolution.prioritySource,SLA_Hours:slaHours,SLA_Source:resolution.slaSource,SLA_Due_At:slaDueAt,Status:APP.STATUS.RAISED,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',SLA_Result:'ON TRACK',Duplicate_Of:cleanText_(form.duplicateIds||'',500),Duplicate_Override:String(form.duplicateOverride||'').toLowerCase()==='true',Dynamic_Fields_JSON:JSON.stringify(extractDynamicFields_(form,category)),Attachment_File_ID:attachment.id,Attachment_File_Name:attachment.name,Attachment_URL:attachment.url,Updated_At:createdAt,Updated_By:user.email,Submission_Request_ID:requestId,Current_SLA_Cycle:1};
   lock=LockService.getScriptLock();lockStarted=Date.now();lock.waitLock(10000);try{existing=findTicketBySubmissionRequestId_(requestId);if(existing){if(attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}return getTicketDetail(existing.object.Ticket_ID);}requireTicketSlaCyclesSchemaForWrite_(true);appendObject_(APP.SHEETS.TICKETS,ticket);appendSlaCycle_({Ticket_ID:ticketId,Cycle_Number:1,Cycle_Type:'INITIAL',Started_At:createdAt,Due_At:slaDueAt,SLA_Result:'OPEN',Started_By:user.email,Created_At:createdAt,Updated_At:createdAt});appendEvent_(ticketId,'TICKET_RAISED','',APP.STATUS.RAISED,user.email,ticket.Duplicate_Override?'Raised despite duplicate warning.':'',createdAt,requestId);upsertTicketIndex_(ticket);invalidateTicketCaches_();}catch(err){if(attachment.id)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(orphanErr){}throw err;}finally{lock.releaseLock();}
   const detail=getTicketDetail(ticketId);try{sendSlackAlert_(detail);}catch(err){console.error('Slack alert failed.');}logPerformance_('submitTicket',startedAt,{rows:1,lockWaitMs:lockWaitMs+Date.now()-lockStarted});return detail;
 }
