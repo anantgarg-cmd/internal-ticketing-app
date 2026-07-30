@@ -74,18 +74,16 @@ function ensureSheet_(ss, sheetName, headers) {
   if (!sheet) sheet = ss.insertSheet(sheetName);
 
   const existingFirstRow = sheet.getLastColumn() > 0
-    ? sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getDisplayValues()[0]
+    ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0]
     : [];
   const hasAnyHeader = existingFirstRow.some(v => String(v).trim() !== '');
 
   if (!hasAnyHeader) {
-    sheet.clear();
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   } else {
-    const current = sheet.getRange(1, 1, 1, headers.length).getDisplayValues()[0];
-    if (current.join('|') !== headers.join('|')) {
-      throw new Error(`The ${sheetName} sheet already has different columns. Use a new blank spreadsheet or match the supplied headers.`);
-    }
+    const current = existingFirstRow.map(value => String(value).trim());
+    const missing = headers.filter(header => current.indexOf(header) < 0);
+    if (missing.length) sheet.getRange(1, current.length + 1, 1, missing.length).setValues([missing]);
   }
   sheet.setFrozenRows(1);
 }
@@ -168,32 +166,77 @@ function formatSheets_(ss) {
     sheet.setRowHeight(1, 32);
   });
 
-  const tickets = ss.getSheetByName(APP.SHEETS.TICKETS);
-  tickets.getRange('B:B').setNumberFormat('dd-mmm-yyyy hh:mm');
-  tickets.getRange('P:P').setNumberFormat('dd-mmm-yyyy hh:mm');
-  tickets.getRange('S:T').setNumberFormat('dd-mmm-yyyy hh:mm');
-  tickets.getRange('X:X').setNumberFormat('dd-mmm-yyyy hh:mm');
-  tickets.getRange('AF:AF').setNumberFormat('dd-mmm-yyyy hh:mm');
-
-  const events = ss.getSheetByName(APP.SHEETS.EVENTS);
-  events.getRange('G:G').setNumberFormat('dd-mmm-yyyy hh:mm');
-
-  const cycles = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
-  cycles.getRange('E:G').setNumberFormat('dd-mmm-yyyy hh:mm');
-  cycles.getRange('L:M').setNumberFormat('dd-mmm-yyyy hh:mm');
+  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.TICKETS),
+    ['Created_At','SLA_Due_At','Picked_Up_At','Investigating_At','Resolved_At','Updated_At']);
+  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.EVENTS), ['Created_At']);
+  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.SLA_CYCLES),
+    ['Started_At','Due_At','Ended_At','Created_At','Updated_At']);
 }
 
-/** Safe, idempotent one-time upgrade for existing installations. */
-function upgradeSlaCycleSchema() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet() || getSpreadsheet_();
-  let sheet = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
-  if (!sheet) sheet = ss.insertSheet(APP.SHEETS.SLA_CYCLES);
-  const headers = APP.HEADERS.TicketSLACycles;
-  const firstRow = sheet.getLastColumn() ? sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getDisplayValues()[0] : [];
-  if (!firstRow.some(value => String(value).trim())) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  else if (firstRow.slice(0, headers.length).join('|') !== headers.join('|')) throw new Error('TicketSLACycles has unexpected headers; no data was changed.');
+function formatDateTimeColumns_(sheet, headerNames) {
+  if (!sheet || !sheet.getLastColumn()) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(String);
+  headerNames.forEach(header => {
+    const column = headers.indexOf(header) + 1;
+    if (column) sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1), 1).setNumberFormat('dd-mmm-yyyy hh:mm');
+  });
+}
+
+function formatSlaCycleSheet_(sheet) {
+  const lastColumn = sheet.getLastColumn();
   sheet.setFrozenRows(1);
-  sheet.getRange('E:G').setNumberFormat('dd-mmm-yyyy hh:mm');
-  sheet.getRange('L:M').setNumberFormat('dd-mmm-yyyy hh:mm');
-  return { success: true, sheet: APP.SHEETS.SLA_CYCLES, created: sheet.getLastRow() <= 1 };
+  if (lastColumn) {
+    sheet.getRange(1, 1, 1, lastColumn).setFontWeight('bold').setBackground('#1f2937').setFontColor('#ffffff').setWrap(true);
+    sheet.setRowHeight(1, 32);
+    sheet.autoResizeColumns(1, lastColumn);
+  }
+  formatDateTimeColumns_(sheet, ['Started_At','Due_At','Ended_At','Created_At','Updated_At']);
+}
+
+/** Additive, idempotent schema repair. The optional argument is for callers already holding ScriptLock. */
+function ensureTicketSlaCyclesSchema_(lockAlreadyHeld) {
+  const ss = getSpreadsheet_();
+  const headers = APP.HEADERS.TicketSLACycles;
+  let sheet = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
+  let lock = null;
+  let sheetCreated = false;
+  const columnsAdded = [];
+  if (!lockAlreadyHeld) {
+    lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+  }
+  try {
+    sheet = ss.getSheetByName(APP.SHEETS.SLA_CYCLES);
+    if (!sheet) {
+      sheet = ss.insertSheet(APP.SHEETS.SLA_CYCLES);
+      sheetCreated = true;
+    }
+    const existing = sheet.getLastColumn()
+      ? sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0].map(value => String(value).trim())
+      : [];
+    const populated = existing.filter(Boolean);
+    const missing = headers.filter(header => populated.indexOf(header) < 0);
+    if (missing.length) {
+      const startColumn = existing.length + 1;
+      sheet.getRange(1, startColumn, 1, missing.length).setValues([missing]);
+      Array.prototype.push.apply(columnsAdded, missing);
+    }
+    formatSlaCycleSheet_(sheet);
+    return { sheetCreated, columnsAdded, ready: true };
+  } finally {
+    if (lock) lock.releaseLock();
+  }
+}
+
+/** Safe public upgrade for legacy installations; never clears or rebuilds source sheets. */
+function upgradeSlaCycleSchema() {
+  const result = ensureTicketSlaCyclesSchema_();
+  return { success: true, ready: result.ready, sheetCreated: result.sheetCreated, columnsAdded: result.columnsAdded,
+    message: result.sheetCreated ? 'TicketSLACycles was created.' : (result.columnsAdded.length ? 'Missing SLA-cycle columns were appended.' : 'TicketSLACycles was already ready.') };
+}
+
+/** Complete additive upgrade entry point retained for deployment runbooks. */
+function upgradeClientSizeAndPerformanceSchema() {
+  const slaCycles = ensureTicketSlaCyclesSchema_();
+  return { success: true, slaCycles, message: 'Additive schema validation completed; no source sheets or historical rows were cleared.' };
 }
