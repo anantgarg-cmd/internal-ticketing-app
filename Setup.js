@@ -25,7 +25,7 @@ const APP = Object.freeze({
       'Category_ID','Category_Name','Email_Subject','Normalized_Subject','Issue_Description','Priority','SLA_Hours',
       'SLA_Due_At','Status','Picked_Up_By','Picked_Up_At','Investigating_At','Resolution_Note','Root_Cause',
       'Resolved_By','Resolved_At','SLA_Result','Duplicate_Of','Duplicate_Override','Dynamic_Fields_JSON',
-      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Client_Size','Priority_Source','Submission_Request_ID'
+      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Client_Size','Priority_Source','SLA_Source','Submission_Request_ID'
     ],
     Clients: ['Client_ID','Client_Name','Client_Type','Active'],
     Categories: ['Category_ID','Client_Type','Category_Name','Priority','SLA_Hours','Fields_JSON','Required_Fields_JSON','Active'],
@@ -36,14 +36,14 @@ const APP = Object.freeze({
       'SLA_Cycle_ID','Ticket_ID','Cycle_Number','Cycle_Type','Started_At','Due_At','Ended_At','SLA_Result',
       'Started_By','Ended_By','Reopen_Reason','Created_At','Updated_At'
     ],
-    ClientSizePriority: ['Client_Size_Code','Display_Label','ADL_Description','Min_ADL','Max_ADL','Priority','Active','Sort_Order'],
+    ClientSizePriority: ['Client_Size_Code','Display_Label','ADL_Description','Min_ADL','Max_ADL','Priority','SLA_Hours','Active','Sort_Order'],
     TicketIndex: ['Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_ID','Client_Name','Client_Type','Client_Size','Client_Key','Category_ID','Category_Name','Email_Subject','Normalized_Subject','Priority','Priority_Source','SLA_Due_At','Status','Resolved_At','SLA_Result','Current_SLA_Cycle','Submission_Request_ID','Updated_At']
   })
 });
 
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
-const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v5';
+const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v6';
 const SCHEMA_UPGRADE_IN_PROGRESS_ = 'SCHEMA_UPGRADE_IN_PROGRESS';
 const SCHEMA_TEMPORARY_MESSAGE_ = 'The application structure is being upgraded. Please refresh once after a few seconds.';
 const SCHEMA_ADMIN_MESSAGE_ = 'The application structure could not be prepared automatically. Please ask the administrator to run repairApplicationSchema() from Apps Script.';
@@ -165,9 +165,9 @@ function category_(id, clientType, name, priority, slaHours, fields, required) {
 
 function clientSizePrioritySeedRows_() {
   return [
-    ['GOLD_PLATINUM','Gold / Platinum','ADL 300 and above',300,'','HIGH',true,1],
-    ['MEDIUM_SIZED','Medium-sized','ADL between 50 and 299',50,299,'MEDIUM',true,2],
-    ['SMALL_SIZED','Small-sized','ADL below 50',0,49,'LOW',true,3]
+    ['GOLD_PLATINUM','Gold / Platinum','ADL 300 and above',300,'','HIGH',8,true,1],
+    ['MEDIUM_SIZED','Medium-sized','ADL between 50 and 299',50,299,'MEDIUM',24,true,2],
+    ['SMALL_SIZED','Small-sized','ADL below 50',0,49,'LOW',48,true,3]
   ];
 }
 
@@ -182,6 +182,19 @@ function seedClientSizePriority_(ss) {
     const canonical = APP.HEADERS.ClientSizePriority;
     sheet.getRange(sheet.getLastRow() + 1, 1, missing.length, headers.length)
       .setValues(missing.map(seed => headers.map(header => seed[canonical.indexOf(header)] === undefined ? '' : seed[canonical.indexOf(header)])));
+  }
+  // A deployment upgrading from the pre-SLA schema has existing size rows but
+  // a newly appended, blank SLA_Hours column. Populate only those blanks;
+  // configured values are never replaced.
+  const slaColumn = headers.indexOf('SLA_Hours');
+  if (slaColumn >= 0 && existing.length) {
+    const defaults = clientSizePrioritySeedRows_().reduce((map, row) => { map[row[0]] = row[6]; return map; }, {});
+    existing.forEach((row, index) => {
+      const code = String(row[codeColumn] || '');
+      if (defaults[code] !== undefined && String(row[slaColumn] == null ? '' : row[slaColumn]).trim() === '') {
+        sheet.getRange(index + 2, slaColumn + 1).setValue(defaults[code]);
+      }
+    });
   }
   return missing.map(row => row[0]);
 }
@@ -251,6 +264,9 @@ function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
   // Migration 5 deliberately rechecks the complete contract. This also makes
   // repair safe where a tab/column was manually created during an older release.
   if (toVersion >= 5) { ensure(Object.values(APP.SHEETS)); seedMissingConfigurationRows_(ss, report); formatSheets_(ss); }
+  // Version 6 adds SLA source-of-truth columns. Additive header repair and
+  // absent-row-only seeding preserve every administrator-edited value.
+  if (toVersion >= 6) { ensure([APP.SHEETS.TICKETS, APP.SHEETS.CLIENT_SIZE_PRIORITY]); seedMissingConfigurationRows_(ss, report); }
   const indexResult = backfillTicketIndexIfNeeded_(ss);
   report.ticketIndexRowsCreated += indexResult.created;
   if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');
