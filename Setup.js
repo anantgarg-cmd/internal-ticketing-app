@@ -15,7 +15,8 @@ const APP = Object.freeze({
     SETTINGS: 'Settings',
     SLA_CYCLES: 'TicketSLACycles',
     CLIENT_SIZE_PRIORITY: 'ClientSizePriority',
-    TICKET_INDEX: 'TicketIndex'
+    TICKET_INDEX: 'TicketIndex',
+    SLACK_NOTIFICATIONS: 'SlackNotifications'
   }),
   ROLES: Object.freeze({ SALES: 'SALES', POC: 'POC', ADMIN: 'ADMIN' }),
   STATUS: Object.freeze({ RAISED: 'Raised', REOPENED: 'Reopened', INVESTIGATING: 'Investigating', RESOLVED: 'Resolved' }),
@@ -37,13 +38,15 @@ const APP = Object.freeze({
       'Started_By','Ended_By','Reopen_Reason','Created_At','Updated_At'
     ],
     ClientSizePriority: ['Client_Size_Code','Display_Label','ADL_Description','Min_ADL','Max_ADL','Priority','SLA_Hours','Active','Sort_Order'],
-    TicketIndex: ['Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_ID','Client_Name','Client_Type','Client_Size','Client_Key','Category_ID','Category_Name','Email_Subject','Normalized_Subject','Priority','Priority_Source','SLA_Due_At','Status','Resolved_At','SLA_Result','Current_SLA_Cycle','Submission_Request_ID','Updated_At']
+    TicketIndex: ['Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_ID','Client_Name','Client_Type','Client_Size','Client_Key','Category_ID','Category_Name','Email_Subject','Normalized_Subject','Priority','Priority_Source','SLA_Due_At','Status','Resolved_At','SLA_Result','Current_SLA_Cycle','Submission_Request_ID','Updated_At'],
+    SlackNotifications: ['Notification_ID','Dedupe_Key','Notification_Type','Ticket_ID','SLA_Cycle_Number','Priority','Payload_JSON','Status','Attempts','Next_Attempt_At','Created_At','Processing_Started_At','Sent_At','Last_HTTP_Code','Last_Error','Updated_At']
   })
 });
 
-const CURRENT_SCHEMA_VERSION = 6;
+// Version 6 is already the client-size SLA release; Slack is the next additive migration.
+const CURRENT_SCHEMA_VERSION = 7;
 const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
-const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v6';
+const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v7';
 const SCHEMA_UPGRADE_IN_PROGRESS_ = 'SCHEMA_UPGRADE_IN_PROGRESS';
 const SCHEMA_TEMPORARY_MESSAGE_ = 'The application structure is being upgraded. Please refresh once after a few seconds.';
 const SCHEMA_ADMIN_MESSAGE_ = 'The application structure could not be prepared automatically. Please ask the administrator to run repairApplicationSchema() from Apps Script.';
@@ -101,24 +104,22 @@ function ensureSheet_(ss, sheetName, headers) {
 
 function seedSettings_(ss) {
   const sheet = ss.getSheetByName(APP.SHEETS.SETTINGS);
-  if (sheet.getLastRow() > 1) return;
-
   const activeEmail = (Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || '').toLowerCase();
   const domain = activeEmail.includes('@') ? activeEmail.split('@')[1] : 'yourcompany.com';
-
   const rows = [
     ['COMPANY_DOMAIN', domain, 'Only email addresses from this domain can use the app.'],
     ['DUPLICATE_WINDOW_DAYS', '5', 'Look back this many days for possible duplicate tickets.'],
     ['DUPLICATE_SIMILARITY_THRESHOLD', '0.65', '0 to 1. Higher means stricter subject matching.'],
     ['RESOLVED_VISIBILITY_DAYS', '10', 'Sales can see their resolved tickets for this many days.'],
     ['DASHBOARD_WINDOW_DAYS', '14', 'Numbers dashboard lookback period.'],
-    ['ALERT_PRIORITIES', 'HIGH', 'Comma-separated priorities that trigger Slack alerts, e.g. HIGH,CRITICAL.'],
+    ['ALERT_PRIORITIES', 'HIGH', 'Legacy alert priority setting.'],
     ['MAX_ATTACHMENT_MB', '5', 'Maximum evidence file size.'],
     ['ROOT_CAUSES', 'Product Bug|Configuration Issue|Data Issue|Integration/API Issue|Access/Permission|User Error|External Dependency|Process Gap|Unable to Reproduce|Other', 'Values shown when resolving a ticket.']
   ];
-  sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  const existing = sheet.getLastRow()>1 ? sheet.getRange(2,1,sheet.getLastRow()-1,1).getDisplayValues().map(row=>String(row[0])) : [];
+  const missing=rows.filter(row=>existing.indexOf(row[0])<0);
+  if(missing.length)sheet.getRange(sheet.getLastRow()+1,1,missing.length,3).setValues(missing);
 }
-
 function seedAdminUser_(ss) {
   const sheet = ss.getSheetByName(APP.SHEETS.USERS);
   if (sheet.getLastRow() > 1) return;
@@ -211,6 +212,7 @@ function formatSheets_(ss) {
   formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.EVENTS), ['Created_At']);
   formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.SLA_CYCLES), ['Started_At','Due_At','Ended_At','Created_At','Updated_At']);
   formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.TICKET_INDEX), ['Created_At','SLA_Due_At','Resolved_At','Updated_At']);
+  formatDateTimeColumns_(ss.getSheetByName(APP.SHEETS.SLACK_NOTIFICATIONS), ['Next_Attempt_At','Created_At','Processing_Started_At','Sent_At','Updated_At']);
 }
 
 function formatDateTimeColumns_(sheet, headerNames) {
@@ -248,8 +250,39 @@ function appendMissingColumns_(sheet, expectedHeaders) {
 
 function seedMissingConfigurationRows_(spreadsheet, summary) {
   const seeded = seedClientSizePriority_(spreadsheet);
+  const slackSeeded = seedMissingSlackSettings_(spreadsheet);
   if (summary) summary.configurationRowsSeeded.ClientSizePriority = seeded;
+  if (summary) summary.configurationRowsSeeded.Slack = slackSeeded;
   return seeded;
+}
+
+function slackSettingSeedRows_() {
+  return [
+    ['SLACK_NOTIFICATIONS_ENABLED','TRUE','Enable or disable all Slack notifications.'],
+    ['SLACK_ALERT_PRIORITIES','HIGH,CRITICAL','Ticket priorities that generate an immediate raised/reopened alert.'],
+    ['SLACK_MENTION_PRIORITIES','HIGH,CRITICAL','Priorities for which Slack messages include <!here>.'],
+    ['SLACK_BREACH_WARNING_ENABLED','TRUE','Enable the warning before SLA breach.'],
+    ['SLACK_BREACH_WARNING_MINUTES','120','Working minutes before SLA breach at which a warning is generated.'],
+    ['SLACK_BREACH_ALERT_ENABLED','TRUE','Enable notification after SLA has been breached.'],
+    ['SLACK_EOD_SUMMARY_ENABLED','TRUE','Enable the weekday end-of-day summary.'],
+    ['SLACK_EOD_HOUR','19','End-of-day summary hour in Asia/Kolkata.'],
+    ['SLACK_EOD_MINUTE','45','End-of-day summary minute in Asia/Kolkata.'],
+    ['SLACK_DISPATCH_BATCH_SIZE','10','Maximum pending Slack notifications processed in one dispatcher run.'],
+    ['SLACK_MAX_RETRIES','3','Maximum Slack delivery attempts.'],
+    ['SLACK_PROCESSING_TIMEOUT_MINUTES','10','Minutes after which an abandoned PROCESSING row can be retried.'],
+    ['SLACK_NOTIFICATION_RETENTION_DAYS','30','Days to retain sent and permanently failed queue records.']
+  ];
+}
+
+function seedMissingSlackSettings_(spreadsheet) {
+  const sheet = spreadsheet.getSheetByName(APP.SHEETS.SETTINGS);
+  if (!sheet) return [];
+  const width = sheet.getLastColumn(), headers = sheet.getRange(1,1,1,width).getDisplayValues()[0].map(String);
+  const keyColumn = headers.indexOf('Key');
+  const existing = sheet.getLastRow() > 1 ? sheet.getRange(2,keyColumn+1,sheet.getLastRow()-1,1).getDisplayValues().map(row => String(row[0])) : [];
+  const missing = slackSettingSeedRows_().filter(row => existing.indexOf(row[0]) < 0);
+  if (missing.length) sheet.getRange(sheet.getLastRow()+1,1,missing.length,width).setValues(missing.map(seed => headers.map((header) => seed[['Key','Value','Description'].indexOf(header)] || '')));
+  return missing.map(row => row[0]);
 }
 
 /** Every migration is additive and can safely repair a partially/manual migration. */
@@ -267,6 +300,9 @@ function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
   // Version 6 adds SLA source-of-truth columns. Additive header repair and
   // absent-row-only seeding preserve every administrator-edited value.
   if (toVersion >= 6) { ensure([APP.SHEETS.TICKETS, APP.SHEETS.CLIENT_SIZE_PRIORITY]); seedMissingConfigurationRows_(ss, report); }
+  // Version 7 adds only operational Slack queue/configuration data. Existing
+  // columns and rows remain in place and missing fields are appended.
+  if (toVersion >= 7) { ensure([APP.SHEETS.SLACK_NOTIFICATIONS, APP.SHEETS.SETTINGS]); seedMissingConfigurationRows_(ss, report); formatSheets_(ss); }
   const indexResult = backfillTicketIndexIfNeeded_(ss);
   report.ticketIndexRowsCreated += indexResult.created;
   if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');
@@ -426,6 +462,11 @@ function onOpen() {
     .addItem('Repair / Upgrade Application Structure', 'repairApplicationSchema')
     .addItem('Validate Application Structure', 'validateApplicationSchema')
     .addItem('Rebuild Ticket Index', 'rebuildTicketIndex')
+    .addSeparator()
+    .addItem('Validate Slack Automation', 'validateSlackAutomation')
+    .addItem('Install / Repair Slack Triggers', 'setupSlackAutomationTriggers')
+    .addItem('Send Slack Test', 'testSlackConnection')
+    .addItem('Remove Slack Triggers', 'removeSlackAutomationTriggers')
     .addToUi();
 }
 
