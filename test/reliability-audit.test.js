@@ -48,7 +48,7 @@ assert(html.includes("always:restore"));
 assert(html.includes("if(IN_FLIGHT.has(requestKey))return"));
 
 // Authoritative list reads must not silently hide Tickets when TicketIndex is stale.
-assert(/function getMyTickets[\s\S]*?getSheetObjects_\(APP\.SHEETS\.TICKETS\)/.test(code));
+assert(/function getAllTickets[\s\S]*?getSheetObjects_\(APP\.SHEETS\.TICKET_INDEX\)/.test(code));
 assert(/function getQueueTickets[\s\S]*?getSheetObjects_\(APP\.SHEETS\.TICKETS\)/.test(code));
 
 // Network/Drive cleanup is after lock release in the ticket commit flow.

@@ -20,7 +20,7 @@ def one(tag=None,id=None,cls=None):
  found=[n for n in v.nodes if (tag is None or n[0]==tag) and (id is None or n[1].get('id')==id) and (cls is None or cls in n[1].get('class','').split())];assert len(found)==1,(tag,id,cls,len(found));return found[0]
 layout=one('div',cls='app-layout'); nav=one('nav','nav'); main=one('main')
 assert nav[2] is layout and main[2] is layout
-pages=['registrationPage','raisePage','myPage','queuePage','numbersPage']
+pages=['registrationPage','raisePage','myPage','queuePage','numbersPage','featurePage']
 for page in pages: assert one('section',page)[2] is main
 raise_node=one('section','raisePage')
 for page in pages[2:]: assert one('section',page)[2] is not raise_node
