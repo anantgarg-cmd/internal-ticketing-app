@@ -11,8 +11,8 @@ assert(html.includes('https://www.shadowfax.in/logo_header_tm.svg'));
 for (const token of ['--sf-green:#008A71','--sf-yellow:#D5D226','--sf-black:#231F20']) assert(html.includes(token));
 assert(html.includes('object-fit:contain') && html.includes('filter:none') && html.includes('box-shadow:none'));
 assert(html.includes('"Montserrat",Arial,sans-serif'));
-assert(code.includes("const APP_RELEASE = 'taxonomy-feature-requests-all-tickets-v1'"));
-assert(html.includes("const EXPECTED_RELEASE = 'taxonomy-feature-requests-all-tickets-v1'"));
+assert(code.includes("const APP_RELEASE = 'simplified-ticket-forms-v1'"));
+assert(html.includes("const EXPECTED_RELEASE = 'simplified-ticket-forms-v1'"));
 
 // Performance and Apps Script contracts.
 for (const forbidden of ['React','Vue','Angular','jQuery','setInterval(','requestAnimationFrame(function']) assert(!html.includes(forbidden), forbidden);
@@ -37,7 +37,7 @@ assert(html.includes('tabindex="0"'));
 
 // Local-only preferences and safe current-tab draft.
 assert(html.includes("localStorage.setItem('sf-sidebar-collapsed'"));
-assert(html.includes("sessionStorage.setItem('sf-ticket-draft'"));
+assert(html.includes("sessionStorage.setItem('sf-ticket-draft-v2'"));
 assert(html.includes('setTimeout(saveDraft,500)'));
 assert(!/sessionStorage\.setItem[^\n]*(attachment:|fileName|fileSize|userEmail)/i.test(html));
 assert(html.includes('clearDraft();form.reset()'));

@@ -48,9 +48,9 @@ const APP = Object.freeze({
 });
 
 // Version 6 is already the client-size SLA release; Slack is the next additive migration.
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
-const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v8';
+const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v9';
 const SCHEMA_UPGRADE_IN_PROGRESS_ = 'SCHEMA_UPGRADE_IN_PROGRESS';
 const SCHEMA_TEMPORARY_MESSAGE_ = 'The application structure is being upgraded. Please refresh once after a few seconds.';
 const SCHEMA_ADMIN_MESSAGE_ = 'The application structure could not be prepared automatically. Please ask the administrator to run repairApplicationSchema() from Apps Script.';
@@ -195,13 +195,55 @@ function taxonomyRow_(type,group,name,order) {
     '360|WooCommerce|Plugin connection or onboarding':'360-WOOCOMMERCE-CONNECTION','360|WooCommerce|Products not fetched':'360-WOOCOMMERCE-PRODUCTS-NOT-FETCHED','360|WooCommerce|Orders not fetched or imported':'360-WOOCOMMERCE-ORDERS-NOT-FETCHED','360|WooCommerce|Order creation or manifestation':'360-WOOCOMMERCE-ORDER-CREATION','360|WooCommerce|Tracking, status or webhook sync':'360-WOOCOMMERCE-STATUS-SYNC','360|WooCommerce|WooCommerce label issue':'360-WOOCOMMERCE-LABEL','360|WooCommerce|Returns, RTO or NDR':'360-WOOCOMMERCE-RETURNS'
   };
   const id=aliases[[type,group,name].join('|')]||[prefix,taxonomySlug_(group),taxonomySlug_(name)].join('-');
-  const fields=['expected_result','actual_result','first_observed_at','impact_scope','environment','affected_count','affected_ids'];
-  if(group==='Shopify') fields.push('store_url','registered_email','shopify_order_id','awb','expected_status','actual_status','pickup_location','error_message','attachment');
-  else if(group==='WooCommerce') fields.push('store_url','plugin_version','product_sku','woocommerce_order_id','awb','expected_status','actual_status','error_message','attachment');
-  else fields.push('attachment');
-  const required=['expected_result','actual_result','first_observed_at','impact_scope','environment'];
-  if(name==='API error'||name==='Bulk upload'||/label|barcode|page not loading|incorrect data|incorrect charges/i.test(name)) required.push('attachment');
+  const simplified=simplifiedTaxonomyFields_(group,name);
+  const fields=simplified.fields,required=simplified.required;
   return [id,type,name,type==='360'?'MEDIUM':'MEDIUM',24,JSON.stringify(fields),JSON.stringify(required),true,group,name,true,order];
+}
+
+/** The attachment and its optional HTTP(S) evidence link render as one evidence control. */
+function simplifiedTaxonomyFields_(group,name) {
+  let fields=['attachment'],required=[];
+  if(group==='API & Integration') fields=/webhook/i.test(name)?['webhook_partner','api_log','error_message','attachment']:['endpoint','api_log','error_message','attachment'];
+  else if(group==='Orders') fields=['combined_identifier','error_message','attachment'];
+  else if(group==='Tracking & Status') fields=['awb','status_details','attachment'];
+  else if(group==='Labels & Documents') fields=['awb','label_type','attachment'];
+  else if(group==='Serviceability & Routing') fields=['origin_pincode','destination_pincode','service_details','attachment'];
+  else if(group==='Reverse, RTO & QC') fields=['awb','status_details','attachment'];
+  else if(group==='SF360 Portal') fields=['page_feature','error_message','attachment'];
+  else if(group==='Shopify') fields=['store_url','shopify_identifier','error_message','attachment'];
+  else if(group==='WooCommerce') fields=['store_url','woocommerce_identifier','error_message','attachment'];
+  else if(group==='Billing, COD & Bank') fields=['transaction_reference','amount_date','attachment'];
+  else if(group==='Configuration Request') fields=['account_identifier','configuration_details','configuration_target','attachment'];
+  if(group==='Orders') required=['combined_identifier'];
+  else if(group==='Tracking & Status'||group==='Reverse, RTO & QC'||group==='Labels & Documents') required=['awb'];
+  else if(group==='Serviceability & Routing') required=['origin_pincode','destination_pincode'];
+  else if(group==='Shopify'||group==='WooCommerce') required=['store_url','attachment'];
+  else if(group==='Configuration Request') required=['configuration_details'];
+  else if(group==='API & Integration'&&name==='API error') required=['api_log'];
+  if(group==='SF360 Portal'&&/page|display|feature not visible/i.test(name)) required=['attachment'];
+  if(group==='Labels & Documents'&&/incorrect label|barcode/i.test(name)) required=['awb','attachment'];
+  if(group==='Orders'&&/bulk upload/i.test(name)) required=['combined_identifier','attachment'];
+  return {fields:fields,required:required};
+}
+
+function simplifyKnownTaxonomyRows_(ss) {
+  const sheet=ss.getSheetByName(APP.SHEETS.CATEGORIES),warnings=[];
+  if(!sheet)return {categoriesUpdated:0,categoriesUnchanged:0,customCategoriesPreserved:0,schemaVersion:CURRENT_SCHEMA_VERSION,warnings:['Categories sheet is unavailable.']};
+  const values=sheet.getDataRange().getValues(),headers=values[0].map(String),idCol=headers.indexOf('Category_ID'),fieldsCol=headers.indexOf('Fields_JSON'),requiredCol=headers.indexOf('Required_Fields_JSON');
+  const groupCol=headers.indexOf('Category_Group'),nameCol=headers.indexOf('Subcategory_Name'),known=new Set(taxonomySeedRows_().map(row=>String(row[0])));let updated=0,unchanged=0,custom=0;
+  for(let i=1;i<values.length;i++){
+    if(!known.has(String(values[i][idCol]))){custom++;continue;}
+    const config=simplifiedTaxonomyFields_(String(values[i][groupCol]),String(values[i][nameCol])),fields=JSON.stringify(config.fields),required=JSON.stringify(config.required);
+    if(String(values[i][fieldsCol])===fields&&String(values[i][requiredCol])===required){unchanged++;continue;}
+    sheet.getRange(i+1,fieldsCol+1).setValue(fields);sheet.getRange(i+1,requiredCol+1).setValue(required);updated++;
+  }
+  return {categoriesUpdated:updated,categoriesUnchanged:unchanged,customCategoriesPreserved:custom,schemaVersion:CURRENT_SCHEMA_VERSION,warnings:warnings};
+}
+
+/** Safe administrator recovery: updates only known system taxonomy field configuration. */
+function simplifyTicketForms() {
+  requireRole_([APP.ROLES.ADMIN]);const lock=LockService.getScriptLock();lock.waitLock(30000);
+  try{const result=simplifyKnownTaxonomyRows_(getSpreadsheet_());PropertiesService.getScriptProperties().setProperty(APP_SCHEMA_VERSION_PROPERTY_,String(CURRENT_SCHEMA_VERSION));invalidateSchemaCaches_();return result;}finally{lock.releaseLock();}
 }
 
 function seedMissingTaxonomyRows_(ss,summary) {
@@ -373,6 +415,7 @@ function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
   // columns and rows remain in place and missing fields are appended.
   if (toVersion >= 7) { ensure([APP.SHEETS.SLACK_NOTIFICATIONS, APP.SHEETS.SETTINGS]); seedMissingConfigurationRows_(ss, report); }
   if (toVersion >= 8) { ensure([APP.SHEETS.CATEGORIES,APP.SHEETS.TICKETS,APP.SHEETS.TICKET_INDEX,APP.SHEETS.FEATURE_REQUESTS,APP.SHEETS.FEATURE_REQUEST_EVENTS]); seedMissingTaxonomyRows_(ss,report); migrateRootCauses_(ss,report); }
+  if (fromVersion < 9 && toVersion >= 9) { ensure([APP.SHEETS.CATEGORIES]); const simplified=simplifyKnownTaxonomyRows_(ss); report.configurationRowsSeeded.SimplifiedTaxonomy=simplified; }
   const indexResult = backfillTicketIndexIfNeeded_(ss);
   report.ticketIndexRowsCreated += indexResult.created;
   if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');

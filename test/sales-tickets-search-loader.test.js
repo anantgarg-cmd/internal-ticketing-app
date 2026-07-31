@@ -39,7 +39,7 @@ assert(html.includes('options.showLoader===false'));
 assert(html.includes("method:'getInitialAppState',showLoader:false"));
 assert(html.includes('.getSlaDuePreview(categoryId,sizeCode)'));
 assert(html.includes("method:'submitTicket',payload:form"));
-for(const message of ['Setting up your workspace…','Checking for similar tickets…','Uploading evidence and creating your ticket…','Loading Sales tickets…','Loading your tickets…','Loading the work queue…','Loading ticket details…','Updating ticket status…','Preparing the new SLA cycle…','Reopening the ticket…','Loading SLA dashboard…']) assert(html.includes(message), message);
+for(const message of ['Setting up your workspace…','Checking for similar tickets…','Creating ticket…','Loading Sales tickets…','Loading your tickets…','Loading the work queue…','Loading ticket details…','Updating ticket status…','Preparing the new SLA cycle…','Reopening the ticket…','Loading SLA dashboard…']) assert(html.includes(message), message);
 assert(html.includes('@media(prefers-reduced-motion:reduce)'));
 assert(html.includes('function fatal(err){hideGlobalLoader()'));
 console.log('sales visibility, activity search/cache, permissions, labels, and global loader contracts passed');
