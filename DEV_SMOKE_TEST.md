@@ -70,3 +70,34 @@
 8. [ ] Run read-only `runEndToEndHealthCheck()` first; if not ready, stop and roll back the deployment version without modifying data.
 9. [ ] Perform a minimal authorized Production smoke with a designated test client only if organizational policy permits; otherwise rely on DEV evidence.
 10. [ ] Confirm UI/backend release and short commit match, triggers are singular, monitoring is healthy, and preserve rollback version/evidence.
+
+## Final production live smoke test (2026-07-31)
+
+> **Deployment status:** Every item below is **NOT RUN**. These steps require the live Apps Script deployment, configured Sheets/Drive, real role accounts, and (where noted) Slack. Local static tests do not count as execution.
+
+### SALES — NOT RUN
+
+- [ ] **NOT RUN** — Raise a 360 ticket and confirm server-returned ClientSizePriority priority/SLA and `CLIENT_SIZE` sources.
+- [ ] **NOT RUN** — Raise a Regular ticket and confirm server-returned Subcategory priority/SLA and `CATEGORY` sources.
+- [ ] **NOT RUN** — Raise API, Shopify, and WooCommerce tickets; satisfy each practical evidence rule without entering credentials or secrets.
+- [ ] **NOT RUN** — Upload each supported attachment type and use a safe HTTP/HTTPS supporting or video link separately (neither should require the other).
+- [ ] **NOT RUN** — Trigger a duplicate warning, then use **Raise Anyway** once; verify one ticket/event despite repeat clicks or a retry.
+- [ ] **NOT RUN** — View another user's ticket in All Tickets; confirm Work Queue and status actions are absent.
+- [ ] **NOT RUN** — Reopen only a personally raised resolved ticket; confirm another Sales user's ticket is denied.
+- [ ] **NOT RUN** — Submit a Feature Request using only Product Area, Feature Title, Business Case, and Expected Benefit.
+
+### POC / ADMIN — NOT RUN
+
+- [ ] **NOT RUN** — Open Work Queue, investigate a Raised/Reopened ticket, and resolve it with a configured RCA and resolution note.
+- [ ] **NOT RUN** — Reopen a resolved ticket and verify the new independent SLA cycle and timeline event.
+- [ ] **NOT RUN** — Manage a Feature Request through a valid transition with product priority, owner, response, and target timeline.
+- [ ] **NOT RUN** — Validate dashboard counts/adherence and compare them with representative resolved/open tickets.
+- [ ] **NOT RUN** — As ADMIN, run `runEndToEndHealthCheck()` and `validateSlackAutomation()`; then run `testSlackConnection()` only when an intentional Slack test message is acceptable.
+
+### Regression — NOT RUN
+
+- [ ] **NOT RUN** — Open a historical ticket and a legacy-category ticket; verify category fallback, dynamic fields, attachment, resolution, events, and SLA history.
+- [ ] **NOT RUN** — Search before pagination in All Tickets and Work Queue; move between pages and open a result.
+- [ ] **NOT RUN** — Open a valid attachment and verify a missing/deleted Drive file fails without blanking or trapping the page.
+- [ ] **NOT RUN** — Test phone and desktop layouts, table overflow, drawer close/focus return, navigation, empty states, and Error with Retry.
+- [ ] **NOT RUN** — Force backend failure and timeout paths on each page; confirm no blank page and no stuck local or global loader.

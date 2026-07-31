@@ -3,7 +3,7 @@
  * Do not put passwords or the Slack webhook directly in this file.
  */
 
-const APP_RELEASE = 'simplified-ticket-forms-v1';
+const APP_RELEASE = 'production-audit-v1';
 const APP_COMMIT = '__APP_COMMIT__';
 let SPREADSHEET_INSTANCE_ = null;
 let SLA_SCHEMA_RECOVERY_FAILED_ = false;
@@ -59,6 +59,7 @@ function authorizeApplication() {
 
 /** Returns non-sensitive authorization state for manual editor diagnostics. */
 function getAuthorizationDiagnostic() {
+  requireRole_([APP.ROLES.ADMIN]);
   const info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
   const status = info.getAuthorizationStatus();
   return {
@@ -145,7 +146,7 @@ function getReopenPreview(ticketId) {
 function assertCanReopen_(user, ticket) {
   if (String(ticket.Status) !== APP.STATUS.RESOLVED) throw new Error('Only a Resolved ticket can be reopened.');
   if (![APP.ROLES.POC, APP.ROLES.ADMIN].includes(user.role) && lower_(ticket.Raiser_Email) !== user.email) {
-    throw new Error('You are not allowed to reopen another user\'s ticket.');
+    throw new Error('You are not allowed to perform this action.');
   }
 }
 
@@ -200,15 +201,12 @@ function getEntryState() {
 }
 
 function getRuntimeDiagnostics() {
-  const settings = getSettings_();
+  requireRole_([APP.ROLES.ADMIN]);
   return {
-    scriptId: ScriptApp.getScriptId(),
-    serviceUrl: ScriptApp.getService().getUrl(),
     release: APP_RELEASE,
     commit: APP_COMMIT === '__APP_COMMIT__' ? '' : APP_COMMIT,
     hasGetEntryState: typeof getEntryState === 'function',
     timestamp: new Date().toISOString(),
-    companyDomain: lower_(settings.COMPANY_DOMAIN),
     usersSheetExists: Boolean(getSpreadsheet_().getSheetByName(APP.SHEETS.USERS))
   };
 }
@@ -868,7 +866,11 @@ function resolveTicketPriority_(clientType, clientSizeCode, category) {
     if (!(size.slaHours > 0)) throw new Error('The selected Client Size has invalid configured SLA hours.');
     return { clientSize: size.code, priority: size.priority, prioritySource: 'CLIENT_SIZE', slaHours: size.slaHours, slaSource: 'CLIENT_SIZE' };
   }
-  return { clientSize: '', priority: String(category.Priority).toUpperCase(), prioritySource: 'CATEGORY', slaHours: number_(category.SLA_Hours, 24), slaSource: 'CATEGORY' };
+  const priority = String(category.Priority || '').trim().toUpperCase();
+  const slaHours = Number(category.SLA_Hours);
+  if (!['CRITICAL','HIGH','MEDIUM','LOW'].includes(priority)) throw new Error('The selected Subcategory has an invalid configured priority.');
+  if (!Number.isFinite(slaHours) || !(slaHours > 0)) throw new Error('The selected Subcategory has invalid configured SLA hours.');
+  return { clientSize: '', priority, prioritySource: 'CATEGORY', slaHours, slaSource: 'CATEGORY' };
 }
 
 function buildBootstrap_(user) {
@@ -974,7 +976,7 @@ function getMyTickets(options) { return getAllTickets(options); }
 function getQueueTickets(filters) {
   const startedAt=Date.now(); requireRole_([APP.ROLES.POC,APP.ROLES.ADMIN]); filters=filters||{};
   const search=lower_(filters.search),status=filters.status===undefined?'OPEN':String(filters.status),priority=String(filters.priority||''),category=String(filters.category||''),clientSize=String(filters.clientSize||''),sla=String(filters.sla||'');
-  const all=getSheetObjects_(APP.SHEETS.TICKETS), filtered=all.filter(t=>{const x=serializeQueueTicket_(t);return(!search||[x.ticketId,x.clientName,x.emailSubject,x.raiserEmail].join(' ').toLowerCase().includes(search))&&(status==='OPEN'?['Raised','Reopened','Investigating'].includes(x.status):(!status||x.status===status))&&(!priority||x.priority===priority)&&(!category||x.categoryName===category)&&(!clientSize||x.clientSize===clientSize)&&(!sla||x.slaStatus===sla);}).sort(queueSort_);
+  const all=getSheetObjects_(APP.SHEETS.TICKET_INDEX), filtered=all.filter(t=>{const x=serializeQueueTicket_(t);return(!search||[x.ticketId,x.clientName,x.emailSubject,x.raiserEmail].join(' ').toLowerCase().includes(search))&&(status==='OPEN'?['Raised','Reopened','Investigating'].includes(x.status):(!status||x.status===status))&&(!priority||x.priority===priority)&&(!category||x.categoryName===category)&&(!clientSize||x.clientSize===clientSize)&&(!sla||x.slaStatus===sla);}).sort(queueSort_);
   const page=paginate_(filtered,filters.page,filters.pageSize); page.rows=page.rows.map(serializeQueueTicket_); page.categories=getActiveCategories_().map(c=>c.name).filter((v,i,a)=>a.indexOf(v)===i).sort(); page.clientSizes=getActiveClientSizePriorities_(); logPerformance_('getQueueTickets',startedAt,{rows:all.length}); return page;
 }
 
@@ -1266,7 +1268,8 @@ function dispatchSlackNotifications() {
   claims.forEach(row=>{const o=row.object,id=o.Notification_ID,attempt=number_(o.Attempts,0)+1,max=Math.max(1,number_(settings.SLACK_MAX_RETRIES,3));try{let payload;try{payload=JSON.parse(String(o.Payload_JSON||''));if(!payload||typeof payload!=='object')throw new Error('not an object');}catch(parseError){updateClaimedSlackRow_(id,{Status:'FAILED',Attempts:attempt,Last_Error:'Invalid Payload_JSON',Updated_At:new Date()});metrics.notificationsFailed++;return;}const result=sendSlackWebhookPayload_(payload),code=result.code;if(code>=200&&code<300){updateClaimedSlackRow_(id,{Status:'SENT',Attempts:attempt,Sent_At:new Date(),Last_HTTP_Code:code,Last_Error:'',Updated_At:new Date()});metrics.notificationsSent++;return;}const temporary=code===429||(code>=500&&code<=599),retry=temporary&&attempt<max;let delay=retryDelayMinutes_(attempt);if(code===429){const h=result.headers||{},raw=h['Retry-After']||h['retry-after'];delay=Math.max(delay,Math.ceil(number_(Array.isArray(raw)?raw[0]:raw,0)/60));}updateClaimedSlackRow_(id,{Status:retry?'PENDING':'FAILED',Attempts:attempt,Next_Attempt_At:retry?new Date(Date.now()+delay*60000):'',Last_HTTP_Code:code,Last_Error:slackEscape_('Slack HTTP '+code,500),Updated_At:new Date()});if(!retry)metrics.notificationsFailed++;}catch(error){const retry=attempt<max;updateClaimedSlackRow_(id,{Status:retry?'PENDING':'FAILED',Attempts:attempt,Next_Attempt_At:retry?new Date(Date.now()+retryDelayMinutes_(attempt)*60000):'',Last_HTTP_Code:'',Last_Error:slackEscape_('Slack network request failed: '+String(error&&error.message||error).replace(/https:\/\/\S+/g,'[redacted]'),500),Updated_At:new Date()});if(!retry)metrics.notificationsFailed++;}});
   console.log(JSON.stringify(Object.assign({functionName:'dispatchSlackNotifications',durationMs:Date.now()-started},metrics)));return metrics;
 }
-function cleanupSlackNotificationHistory_(){const props=PropertiesService.getScriptProperties(),today=localDateKey_(new Date());if(props.getProperty('SLACK_CLEANUP_DATE')===today)return{cleaned:0};const days=Math.max(1,number_(getSettings_().SLACK_NOTIFICATION_RETENTION_DAYS,30)),cutoff=Date.now()-days*86400000,lock=LockService.getScriptLock();lock.waitLock(5000);try{const sheet=getRequiredSheet_(APP.SHEETS.SLACK_NOTIFICATIONS),headers=queueHeaders_(sheet),status=headers.indexOf('Status'),updated=headers.indexOf('Updated_At');if(sheet.getLastRow()<2){props.setProperty('SLACK_CLEANUP_DATE',today);return{cleaned:0};}const rows=sheet.getRange(2,1,sheet.getLastRow()-1,headers.length).getValues(),keep=rows.filter(row=>['SENT','FAILED'].indexOf(String(row[status]))<0||!toDate_(row[updated])||toDate_(row[updated]).getTime()>=cutoff),cleaned=rows.length-keep.length;if(cleaned){sheet.getRange(2,1,rows.length,headers.length).clearContent();if(keep.length)sheet.getRange(2,1,keep.length,headers.length).setValues(keep);}props.setProperty('SLACK_CLEANUP_DATE',today);return{cleaned:cleaned};}finally{lock.releaseLock();}}
+/** Slack delivery history is an audit trail. Retention is intentionally non-destructive. */
+function cleanupSlackNotificationHistory_(){return{cleaned:0,preserved:true};}
 function setupSlackAutomationTriggers(){const handlers={dispatchSlackNotifications:1,monitorSlackAlerts:15},existing=ScriptApp.getProjectTriggers();Object.keys(handlers).forEach(name=>{const matching=existing.filter(t=>t.getHandlerFunction()===name);matching.slice(1).forEach(t=>ScriptApp.deleteTrigger(t));if(!matching.length)ScriptApp.newTrigger(name).timeBased().everyMinutes(handlers[name]).create();});return{handlers:[{name:'dispatchSlackNotifications',frequency:'every 1 minute'},{name:'monitorSlackAlerts',frequency:'every 15 minutes'}]};}
 function removeSlackAutomationTriggers(){let removed={dispatchSlackNotifications:0,monitorSlackAlerts:0};ScriptApp.getProjectTriggers().forEach(t=>{const name=t.getHandlerFunction();if(Object.prototype.hasOwnProperty.call(removed,name)){ScriptApp.deleteTrigger(t);removed[name]++;}});return{removed:removed};}
 function validateSlackAutomation(){const settings=getSettings_(),sheet=getSpreadsheet_().getSheetByName(APP.SHEETS.SLACK_NOTIFICATIONS),triggers=ScriptApp.getProjectTriggers(),dc=triggers.filter(t=>t.getHandlerFunction()==='dispatchSlackNotifications').length,mc=triggers.filter(t=>t.getHandlerFunction()==='monitorSlackAlerts').length,rows=sheet?queueObjects_(sheet):[],sent=rows.filter(r=>String(r.object.Status)==='SENT').map(r=>toDate_(r.object.Sent_At)).filter(d=>d&&!isNaN(d.getTime())).sort((a,b)=>b-a),warnings=[];let webhook=false;try{getSlackWebhookUrl_();webhook=true;}catch(e){warnings.push('SLACK_WEBHOOK_URL is not configured.');}if(dc!==1)warnings.push('Dispatcher trigger count must be one.');if(mc!==1)warnings.push('Monitor trigger count must be one.');const result={notificationsEnabled:truthy_(settings.SLACK_NOTIFICATIONS_ENABLED),webhookConfigured:webhook,queueSheetReady:Boolean(sheet),dispatcherTriggerPresent:dc>0,monitorTriggerPresent:mc>0,dispatcherTriggerCount:dc,monitorTriggerCount:mc,pendingCount:rows.filter(r=>String(r.object.Status)==='PENDING').length,failedCount:rows.filter(r=>String(r.object.Status)==='FAILED').length,lastSentAt:sent.length?sent[0].toISOString():'',schemaVersion:CURRENT_SCHEMA_VERSION,ready:false,warnings:warnings};result.ready=result.notificationsEnabled&&result.webhookConfigured&&result.queueSheetReady&&dc===1&&mc===1;return result;}
