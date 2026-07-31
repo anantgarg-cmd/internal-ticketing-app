@@ -16,7 +16,9 @@ const APP = Object.freeze({
     SLA_CYCLES: 'TicketSLACycles',
     CLIENT_SIZE_PRIORITY: 'ClientSizePriority',
     TICKET_INDEX: 'TicketIndex',
-    SLACK_NOTIFICATIONS: 'SlackNotifications'
+    SLACK_NOTIFICATIONS: 'SlackNotifications',
+    FEATURE_REQUESTS: 'FeatureRequests',
+    FEATURE_REQUEST_EVENTS: 'FeatureRequestEvents'
   }),
   ROLES: Object.freeze({ SALES: 'SALES', POC: 'POC', ADMIN: 'ADMIN' }),
   STATUS: Object.freeze({ RAISED: 'Raised', REOPENED: 'Reopened', INVESTIGATING: 'Investigating', RESOLVED: 'Resolved' }),
@@ -26,10 +28,10 @@ const APP = Object.freeze({
       'Category_ID','Category_Name','Email_Subject','Normalized_Subject','Issue_Description','Priority','SLA_Hours',
       'SLA_Due_At','Status','Picked_Up_By','Picked_Up_At','Investigating_At','Resolution_Note','Root_Cause',
       'Resolved_By','Resolved_At','SLA_Result','Duplicate_Of','Duplicate_Override','Dynamic_Fields_JSON',
-      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Client_Size','Priority_Source','SLA_Source','Submission_Request_ID'
+      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Client_Size','Priority_Source','SLA_Source','Submission_Request_ID','Category_Group','Subcategory_Name'
     ],
     Clients: ['Client_ID','Client_Name','Client_Type','Active'],
-    Categories: ['Category_ID','Client_Type','Category_Name','Priority','SLA_Hours','Fields_JSON','Required_Fields_JSON','Active'],
+    Categories: ['Category_ID','Client_Type','Category_Name','Priority','SLA_Hours','Fields_JSON','Required_Fields_JSON','Active','Category_Group','Subcategory_Name','Visible_In_Form','Sort_Order'],
     Users: ['Email','Name','Role','Active'],
     TicketEvents: ['Event_ID','Ticket_ID','Event_Type','Old_Value','New_Value','Performed_By','Created_At','Note','Request_ID'],
     Settings: ['Key','Value','Description'],
@@ -38,15 +40,17 @@ const APP = Object.freeze({
       'Started_By','Ended_By','Reopen_Reason','Created_At','Updated_At'
     ],
     ClientSizePriority: ['Client_Size_Code','Display_Label','ADL_Description','Min_ADL','Max_ADL','Priority','SLA_Hours','Active','Sort_Order'],
-    TicketIndex: ['Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_ID','Client_Name','Client_Type','Client_Size','Client_Key','Category_ID','Category_Name','Email_Subject','Normalized_Subject','Priority','Priority_Source','SLA_Due_At','Status','Resolved_At','SLA_Result','Current_SLA_Cycle','Submission_Request_ID','Updated_At'],
-    SlackNotifications: ['Notification_ID','Dedupe_Key','Notification_Type','Ticket_ID','SLA_Cycle_Number','Priority','Payload_JSON','Status','Attempts','Next_Attempt_At','Created_At','Processing_Started_At','Sent_At','Last_HTTP_Code','Last_Error','Updated_At']
+    TicketIndex: ['Ticket_ID','Created_At','Raiser_Email','Raiser_Name','Client_ID','Client_Name','Client_Type','Client_Size','Client_Key','Category_ID','Category_Name','Email_Subject','Normalized_Subject','Priority','Priority_Source','SLA_Due_At','Status','Resolved_At','SLA_Result','Current_SLA_Cycle','Submission_Request_ID','Updated_At','Category_Group','Subcategory_Name'],
+    SlackNotifications: ['Notification_ID','Dedupe_Key','Notification_Type','Ticket_ID','SLA_Cycle_Number','Priority','Payload_JSON','Status','Attempts','Next_Attempt_At','Created_At','Processing_Started_At','Sent_At','Last_HTTP_Code','Last_Error','Updated_At'],
+    FeatureRequests: ['Feature_Request_ID','Created_At','Requested_By_Email','Requested_By_Name','Client_ID','Client_Name','Client_Type','Client_Size','Product_Area','Feature_Title','Problem_Statement','Business_Case','Expected_Benefit','Business_Urgency','Affected_Clients_Count','Expected_Order_Volume','Revenue_Impact','Current_Workaround','Supporting_Link','Attachment_File_ID','Attachment_File_Name','Attachment_URL','Status','Product_Priority','Product_Owner','Product_Response','Target_Timeline','Submission_Request_ID','Updated_At','Updated_By'],
+    FeatureRequestEvents: ['Feature_Request_Event_ID','Feature_Request_ID','Event_Type','Old_Value','New_Value','Performed_By','Note','Request_ID','Created_At']
   })
 });
 
 // Version 6 is already the client-size SLA release; Slack is the next additive migration.
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
-const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v7';
+const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v8';
 const SCHEMA_UPGRADE_IN_PROGRESS_ = 'SCHEMA_UPGRADE_IN_PROGRESS';
 const SCHEMA_TEMPORARY_MESSAGE_ = 'The application structure is being upgraded. Please refresh once after a few seconds.';
 const SCHEMA_ADMIN_MESSAGE_ = 'The application structure could not be prepared automatically. Please ask the administrator to run repairApplicationSchema() from Apps Script.';
@@ -158,6 +162,63 @@ function seedCategories_(ss) {
   ];
 
   sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+const TAXONOMY_GROUPS_ = Object.freeze([
+  ['API & Integration',['New integration','API error','Webhook','Credentials','IP whitelisting']],
+  ['Orders',['Order not created','Order not visible','Bulk upload','Cancellation','Incorrect order details']],
+  ['Tracking & Status',['Tracking not available','Status delayed','Status incorrect','Webhook status missing']],
+  ['Labels & Documents',['Label not generated','Incorrect label','Barcode not scanning','Missing label details']],
+  ['Serviceability & Routing',['Pincode issue','Incorrect hub or node','Wrong service','Incorrect FPD or EDD']],
+  ['Reverse, RTO & QC',['Reverse order issue','RTO issue','Pickup issue','QC issue','Exchange issue']],
+  ['Billing, COD & Bank',['COD remittance','Bank verification','Wallet','Invoice','Incorrect charges']],
+  ['Configuration Request',['Enable service','Enable webhook','Add pincode','Account mapping','Credentials']],
+  ['Other',['Unable to identify','New requirement','General support']]
+]);
+const TAXONOMY_360_ONLY_ = Object.freeze([
+  ['SF360 Portal',['Login or access','Page not loading','Feature not visible','Incorrect data or display','Other portal issue']],
+  ['Shopify',['Store connection or onboarding','Store not found or domain issue','Owner email, OTP or authentication','Orders not fetched or imported','Order fulfilment or status sync','COD or payment status sync','Pickup location or warehouse mapping','Shopify label issue','Returns or reverse orders','Other Shopify issue']],
+  ['WooCommerce',['Plugin connection or onboarding','Authentication or API credentials','Products not fetched','Orders not fetched or imported','Order creation or manifestation','Tracking, status or webhook sync','Pickup location or store mapping','WooCommerce label issue','Returns, RTO or NDR','Other WooCommerce issue']]
+]);
+
+function taxonomySlug_(value) { return String(value).toUpperCase().replace(/&/g,' AND ').replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,''); }
+function taxonomySeedRows_() {
+  const rows=[]; let order=1;
+  ['360','Regular'].forEach(type=>TAXONOMY_GROUPS_.forEach(group=>group[1].forEach(name=>rows.push(taxonomyRow_(type,group[0],name,order++)))));
+  TAXONOMY_360_ONLY_.forEach(group=>group[1].forEach(name=>rows.push(taxonomyRow_('360',group[0],name,order++))));
+  return rows;
+}
+function taxonomyRow_(type,group,name,order) {
+  const prefix=type==='360'?'360':'REG';
+  const aliases={
+    '360|Shopify|Store connection or onboarding':'360-SHOPIFY-STORE-CONNECTION','360|Shopify|Orders not fetched or imported':'360-SHOPIFY-ORDERS-NOT-FETCHED','360|Shopify|Order fulfilment or status sync':'360-SHOPIFY-STATUS-SYNC','360|Shopify|COD or payment status sync':'360-SHOPIFY-COD-SYNC','360|Shopify|Pickup location or warehouse mapping':'360-SHOPIFY-PICKUP-LOCATION','360|Shopify|Shopify label issue':'360-SHOPIFY-LABEL','360|Shopify|Returns or reverse orders':'360-SHOPIFY-RETURNS',
+    '360|WooCommerce|Plugin connection or onboarding':'360-WOOCOMMERCE-CONNECTION','360|WooCommerce|Products not fetched':'360-WOOCOMMERCE-PRODUCTS-NOT-FETCHED','360|WooCommerce|Orders not fetched or imported':'360-WOOCOMMERCE-ORDERS-NOT-FETCHED','360|WooCommerce|Order creation or manifestation':'360-WOOCOMMERCE-ORDER-CREATION','360|WooCommerce|Tracking, status or webhook sync':'360-WOOCOMMERCE-STATUS-SYNC','360|WooCommerce|WooCommerce label issue':'360-WOOCOMMERCE-LABEL','360|WooCommerce|Returns, RTO or NDR':'360-WOOCOMMERCE-RETURNS'
+  };
+  const id=aliases[[type,group,name].join('|')]||[prefix,taxonomySlug_(group),taxonomySlug_(name)].join('-');
+  const fields=['expected_result','actual_result','first_observed_at','impact_scope','environment','affected_count','affected_ids'];
+  if(group==='Shopify') fields.push('store_url','registered_email','shopify_order_id','awb','expected_status','actual_status','pickup_location','error_message','attachment');
+  else if(group==='WooCommerce') fields.push('store_url','plugin_version','product_sku','woocommerce_order_id','awb','expected_status','actual_status','error_message','attachment');
+  else fields.push('attachment');
+  const required=['expected_result','actual_result','first_observed_at','impact_scope','environment'];
+  if(name==='API error'||name==='Bulk upload'||/label|barcode|page not loading|incorrect data|incorrect charges/i.test(name)) required.push('attachment');
+  return [id,type,name,type==='360'?'MEDIUM':'MEDIUM',24,JSON.stringify(fields),JSON.stringify(required),true,group,name,true,order];
+}
+
+function seedMissingTaxonomyRows_(ss,summary) {
+  const sheet=ss.getSheetByName(APP.SHEETS.CATEGORIES),headers=sheet.getRange(1,1,1,sheet.getLastColumn()).getDisplayValues()[0].map(String);
+  const idCol=headers.indexOf('Category_ID'),existing=sheet.getLastRow()>1?sheet.getRange(2,idCol+1,sheet.getLastRow()-1,1).getDisplayValues().map(r=>String(r[0])):[];
+  const canonical=APP.HEADERS.Categories,missing=taxonomySeedRows_().filter(row=>existing.indexOf(row[0])<0);
+  if(missing.length)sheet.getRange(sheet.getLastRow()+1,1,missing.length,headers.length).setValues(missing.map(row=>headers.map(h=>row[canonical.indexOf(h)]===undefined?'':row[canonical.indexOf(h)])));
+  if(summary)summary.configurationRowsSeeded.Taxonomy=missing.map(row=>row[0]);
+  return missing.length;
+}
+
+function migrateRootCauses_(ss,summary) {
+  const oldDefault='Product Bug|Configuration Issue|Data Issue|Integration/API Issue|Access/Permission|User Error|External Dependency|Process Gap|Unable to Reproduce|Other';
+  const next='Client data/input issue|Client configuration issue|Shadowfax configuration issue|Product or technical defect|Third-party integration issue|Authentication or credential issue|Data synchronisation issue|Operations issue|Product limitation|Enhancement request|No issue found|Unable to reproduce|External dependency pending|Other';
+  const sheet=ss.getSheetByName(APP.SHEETS.SETTINGS),rows=sheet.getDataRange().getValues(),headers=rows[0].map(String),key=headers.indexOf('Key'),value=headers.indexOf('Value');
+  for(let i=1;i<rows.length;i++)if(String(rows[i][key])==='ROOT_CAUSES'&&String(rows[i][value])===oldDefault){sheet.getRange(i+1,value+1).setValue(next);if(summary)summary.configurationRowsSeeded.RootCauses=['replaced-known-default'];return true;}
+  return false;
 }
 
 function category_(id, clientType, name, priority, slaHours, fields, required) {
@@ -311,10 +372,23 @@ function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
   // Version 7 adds only operational Slack queue/configuration data. Existing
   // columns and rows remain in place and missing fields are appended.
   if (toVersion >= 7) { ensure([APP.SHEETS.SLACK_NOTIFICATIONS, APP.SHEETS.SETTINGS]); seedMissingConfigurationRows_(ss, report); }
+  if (toVersion >= 8) { ensure([APP.SHEETS.CATEGORIES,APP.SHEETS.TICKETS,APP.SHEETS.TICKET_INDEX,APP.SHEETS.FEATURE_REQUESTS,APP.SHEETS.FEATURE_REQUEST_EVENTS]); seedMissingTaxonomyRows_(ss,report); migrateRootCauses_(ss,report); }
   const indexResult = backfillTicketIndexIfNeeded_(ss);
   report.ticketIndexRowsCreated += indexResult.created;
   if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');
   return { summary: report, indexComplete: indexResult.complete };
+}
+
+/** Administrator-run, additive and idempotent taxonomy/feature-request upgrade. */
+function upgradeTaxonomyAndFeatureRequests() {
+  requireRole_([APP.ROLES.ADMIN]);
+  const lock=LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    const ss=getSpreadsheet_(),summary=newSchemaSummary_();
+    runSchemaMigrations_(Number(PropertiesService.getScriptProperties().getProperty(APP_SCHEMA_VERSION_PROPERTY_)||0),CURRENT_SCHEMA_VERSION,ss,summary);
+    PropertiesService.getScriptProperties().setProperty(APP_SCHEMA_VERSION_PROPERTY_,String(CURRENT_SCHEMA_VERSION)); invalidateSchemaCaches_();
+    return {success:true,schemaVersion:CURRENT_SCHEMA_VERSION,sheetsCreated:summary.sheetsCreated,columnsAdded:summary.columnsAdded,rowsSeeded:summary.configurationRowsSeeded,warnings:summary.warnings};
+  } finally { lock.releaseLock(); }
 }
 
 function schemaNamesReady_(spreadsheet) {

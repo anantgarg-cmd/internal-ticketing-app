@@ -1,0 +1,12 @@
+const assert=require('assert'),fs=require('fs');
+const code=fs.readFileSync('Code.js','utf8'),setup=fs.readFileSync('Setup.js','utf8'),html=fs.readFileSync('Index.html','utf8');
+assert(setup.includes("const CURRENT_SCHEMA_VERSION = 8"));
+['Category_Group','Subcategory_Name','Visible_In_Form','Sort_Order','FeatureRequests','FeatureRequestEvents'].forEach(x=>assert(setup.includes(x)));
+['360-SHOPIFY-STORE-CONNECTION','360-WOOCOMMERCE-CONNECTION','upgradeTaxonomyAndFeatureRequests'].forEach(x=>assert(setup.includes(x)));
+['submitFeatureRequest','getFeatureRequests','getFeatureRequestDetail','updateFeatureRequest','getAllTickets'].forEach(x=>assert(new RegExp(`function ${x}\\(`).test(code)));
+assert(/function getMyTickets\(options\) \{ return getAllTickets\(options\); \}/.test(code));
+assert(/getNumbers\(\)[\s\S]{0,150}APP\.ROLES\.SALES/.test(code));
+assert(/function getQueueTickets[\s\S]{0,150}requireRole_\(\[APP\.ROLES\.POC,APP\.ROLES\.ADMIN\]\)/.test(code));
+assert(html.includes('name="categoryGroup"')&&html.includes('name="categoryId"')&&html.includes('Feature Requests')&&html.includes('All Tickets'));
+assert(!/sendSlack|SLA_Cycle/.test(code.slice(code.indexOf('function submitFeatureRequest'),code.indexOf('function getRecentTicketObjects_'))));
+console.log('taxonomy, all-tickets, role and feature-request contracts passed');
