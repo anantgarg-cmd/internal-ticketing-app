@@ -7,5 +7,5 @@ assert.match(code,/function normalisePaginatedTicketResponse\(/);assert.match(co
 assert.match(code,/const allowed=\['registrationPage','raisePage','myPage','queuePage','numbersPage','featurePage'\]/);
 assert.ok(!code.includes("t.slaStatus.replace(' ','-')"));assert.match(code,/Array\.isArray\(rows\)\?rows:\[\]/);
 assert.ok(html.indexOf('id="activityTicketList"')<html.indexOf('id="activityTicketPagination"'));
-assert.match(html,/production-audit-v1/);assert.match(fs.readFileSync('Code.js','utf8'),/production-audit-v1/);
+assert.match(html,/filter-ux-stability-v1/);assert.match(fs.readFileSync('Code.js','utf8'),/filter-ux-stability-v1/);
 console.log('frontend stability contracts: 14 assertions passed');

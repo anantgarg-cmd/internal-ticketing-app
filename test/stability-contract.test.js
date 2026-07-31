@@ -13,8 +13,8 @@ for (const source of [code, setup]) {
 const duplicates = [...new Set(declarations.filter((name, i) => declarations.indexOf(name) !== i))];
 assert.deepStrictEqual(duplicates, [], `duplicate top-level production functions: ${duplicates.join(', ')}`);
 
-assert(code.includes("const APP_RELEASE = 'production-audit-v1'"));
-assert(html.includes("const EXPECTED_RELEASE = 'production-audit-v1'"));
+assert(code.includes("const APP_RELEASE = 'filter-ux-stability-v1'"));
+assert(html.includes("const EXPECTED_RELEASE = 'filter-ux-stability-v1'"));
 assert(html.includes("if(IN_FLIGHT.has(requestKey))return"));
 assert(html.includes("form.setAttribute('aria-busy','true')"));
 assert(html.includes("form.classList.add('form-submitting')"));

@@ -28,8 +28,8 @@ assert(code.includes('assertCanReopen_(user,ticket)'));
 
 assert(html.includes("TAB_CACHE = { activity: new Map()"));
 assert(html.includes("scope:BOOT.user.role==='SALES'?'sales':'personal'"));
-assert(html.includes("MY_STATE.page=1;loadMyTickets()"));
-assert(html.includes("setTimeout(()=>{MY_STATE.search=activitySearch.value.trim();MY_STATE.page=1;loadMyTickets();},300)"));
+assert(html.includes("function applyActivitySearch(){MY_STATE.search=document.getElementById('activityTicketSearch').value.trim();MY_STATE.page=1;loadMyTickets(true);}"));
+assert(html.includes("if(event.key==='Enter'){event.preventDefault();applyActivitySearch();}"));
 assert(html.includes('All Tickets'));
 assert(!html.includes('My Raised Tickets'));
 assert(html.includes('View and search tickets raised across the organisation.'));

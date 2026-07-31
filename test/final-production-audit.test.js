@@ -4,8 +4,8 @@ const fs = require('fs');
 const code = fs.readFileSync('Code.js', 'utf8');
 const html = fs.readFileSync('Index.html', 'utf8');
 
-assert(code.includes("const APP_RELEASE = 'production-audit-v1'"));
-assert(html.includes("const EXPECTED_RELEASE = 'production-audit-v1'"));
+assert(code.includes("const APP_RELEASE = 'filter-ux-stability-v1'"));
+assert(html.includes("const EXPECTED_RELEASE = 'filter-ux-stability-v1'"));
 assert(code.includes("function getRuntimeDiagnostics() {\n  requireRole_([APP.ROLES.ADMIN]);"));
 assert(!/scriptId:\s*ScriptApp\.getScriptId|serviceUrl:\s*ScriptApp\.getService|companyDomain:/.test(code));
 assert(code.includes("function getAuthorizationDiagnostic() {\n  requireRole_([APP.ROLES.ADMIN]);"));
