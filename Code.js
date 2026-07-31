@@ -3,7 +3,7 @@
  * Do not put passwords or the Slack webhook directly in this file.
  */
 
-const APP_RELEASE = 'taxonomy-feature-requests-all-tickets-v1';
+const APP_RELEASE = 'simplified-ticket-forms-v1';
 const APP_COMMIT = '__APP_COMMIT__';
 let SPREADSHEET_INSTANCE_ = null;
 let SLA_SCHEMA_RECOVERY_FAILED_ = false;
@@ -276,26 +276,27 @@ function validateDuplicatePayload_(payload) {
 
 function validateTicketForm_(form, category, client) {
   if (!client.name) throw new Error('Client is mandatory.');
-  if (!cleanText_(form.emailSubject, 300)) throw new Error('Email subject is mandatory.');
-  if (!cleanText_(form.issueDescription, 5000)) throw new Error('Issue description is mandatory.');
-
-  const visibleFields = safeJsonParse_(category.Fields_JSON, []);
-  const required = safeJsonParse_(category.Required_Fields_JSON, []);
+  if (!category || !cleanText_(category.Category_Group, 200)) throw new Error('Category is mandatory.');
+  if (!cleanText_(category.Subcategory_Name || category.Category_Name, 200)) throw new Error('Subcategory is mandatory.');
+  if (!cleanText_(form.emailSubject, 300)) throw new Error('Subject is mandatory.');
+  if (!cleanText_(form.issueDescription, 5000)) throw new Error('Issue details are mandatory.');
+  if (String(client.type) === '360' && !cleanText_(form.clientSize, 100)) throw new Error('Client Size is mandatory for 360 clients.');
+  if (!cleanText_(form.submissionRequestId, 100)) throw new Error('Submission_Request_ID is required.');
+  const visibleFields = safeJsonParse_(category.Fields_JSON, []), required = safeJsonParse_(category.Required_Fields_JSON, []);
+  const evidenceLink = validateHttpUrl_(form.evidence_link, 'Screenshot or video link');
+  const hasEvidence = hasFile_(form.attachment) || Boolean(evidenceLink);
   required.forEach(field => {
     if (field === 'attachment') {
-      if (!hasFile_(form.attachment)) throw new Error('An attachment is required for this category.');
+      if (!hasEvidence && !(visibleFields.includes('api_log') && cleanText_(form.api_log, 10000))) throw new Error('Add a screenshot, file or video link.');
     } else if (!cleanText_(form[field], 5000)) {
-      throw new Error(`${fieldLabel_(field)} is mandatory for this category.`);
+      if (field === 'api_log' && hasEvidence) return;
+      const errors = {combined_identifier:'Enter the AWB or Order ID.',awb:'Enter the AWB number.',api_log:'Add the API payload or supporting log.',store_url:'Enter the store URL.',origin_pincode:'Enter the origin pincode.',destination_pincode:'Enter the destination pincode.',configuration_details:'Explain what needs to be enabled or changed.'};
+      throw new Error(errors[field] || fieldLabel_(field) + ' is mandatory for this category.');
     }
   });
-
-  const impact=cleanText_(form.impact_scope,100);if(['Multiple orders','All orders'].includes(impact)&&!cleanText_(form.affected_count,50))throw new Error('Affected count is mandatory for multiple or all orders.');
-  if(impact&&['One order','Multiple orders','All orders','Not order-specific'].indexOf(impact)<0)throw new Error('Choose a valid impact scope.');
-  if(form.environment&&['Production','Pre-production','Not applicable'].indexOf(String(form.environment))<0)throw new Error('Choose a valid environment.');
+  const deprecated = ['expected_result','actual_result','first_observed_at','impact_scope','environment','affected_count','affected_ids'];
   Object.keys(form).forEach(key => {
-    if (key.startsWith('dynamic_') && !visibleFields.includes(key.replace('dynamic_', ''))) {
-      throw new Error('Unexpected field received. Refresh the page and try again.');
-    }
+    if (key.startsWith('dynamic_') && !deprecated.includes(key.replace('dynamic_','')) && !visibleFields.includes(key.replace('dynamic_',''))) throw new Error('Unexpected field received. Refresh the page and try again.');
   });
 }
 
@@ -712,6 +713,7 @@ function extractDynamicFields_(form, category) {
     const value = cleanText_(form[field], 10000);
     if (value) result[field] = value;
   });
+  const evidenceLink=cleanText_(form.evidence_link,2000);if(evidenceLink)result.evidence_link=evidenceLink;
   return result;
 }
 
@@ -1039,15 +1041,15 @@ function reopenTicket(payload) {
 // -------------------- Feature Requests (intentionally independent of ticket SLA/Slack) --------------------
 const FEATURE_STATUSES_=['Submitted','Under Review','Planned','In Progress','Delivered','Not Planned'];
 const FEATURE_PRIORITIES_=['Not Assigned','P0','P1','P2','P3'];
-function validateHttpUrl_(value){const text=cleanText_(value,2000);if(text&&!/^https?:\/\/[^\s]+$/i.test(text))throw new Error('Supporting link must be a valid HTTP or HTTPS URL.');return text;}
+function validateHttpUrl_(value,label){const text=cleanText_(value,2000);if(text&&!/^https?:\/\/[^\s]+$/i.test(text))throw new Error((label||'Supporting link')+' must be a valid HTTP or HTTPS URL.');return text;}
 function nextFeatureRequestId_(){const day=Utilities.formatDate(new Date(),APP.TZ,'yyyyMMdd'),prefix='FR-'+day+'-',max=getSheetObjects_(APP.SHEETS.FEATURE_REQUESTS).reduce((n,r)=>String(r.Feature_Request_ID).indexOf(prefix)===0?Math.max(n,number_(String(r.Feature_Request_ID).slice(prefix.length),0)):n,0);return prefix+String(max+1).padStart(4,'0');}
 function featureRequestBySubmission_(id){return id?findObjectRow_(APP.SHEETS.FEATURE_REQUESTS,'Submission_Request_ID',id):null;}
 function featureEventByRequest_(id){return id?findObjectRow_(APP.SHEETS.FEATURE_REQUEST_EVENTS,'Request_ID',id):null;}
 function serializeFeatureRequest_(r){return{featureRequestId:String(r.Feature_Request_ID),createdAt:formatDateTime_(r.Created_At),requestedByEmail:String(r.Requested_By_Email),requestedByName:String(r.Requested_By_Name),clientId:String(r.Client_ID||''),clientName:String(r.Client_Name||''),clientType:String(r.Client_Type||''),clientSize:String(r.Client_Size||''),productArea:String(r.Product_Area),featureTitle:String(r.Feature_Title),problemStatement:String(r.Problem_Statement),businessCase:String(r.Business_Case),expectedBenefit:String(r.Expected_Benefit),businessUrgency:String(r.Business_Urgency),affectedClientsCount:String(r.Affected_Clients_Count||''),expectedOrderVolume:String(r.Expected_Order_Volume||''),revenueImpact:String(r.Revenue_Impact||''),currentWorkaround:String(r.Current_Workaround||''),supportingLink:String(r.Supporting_Link||''),attachmentFileName:String(r.Attachment_File_Name||''),attachmentUrl:String(r.Attachment_URL||''),status:String(r.Status),productPriority:String(r.Product_Priority),productOwner:String(r.Product_Owner||''),productResponse:String(r.Product_Response||''),targetTimeline:String(r.Target_Timeline||''),updatedAt:formatDateTimeOptional_(r.Updated_At)};}
 function submitFeatureRequest(form){
   const user=requireUser_();if(!form||typeof form!=='object')throw new Error('Feature request data is missing.');const requestId=cleanText_(form.submissionRequestId,100);if(!requestId)throw new Error('Submission_Request_ID is required.');let prior=featureRequestBySubmission_(requestId);if(prior)return getFeatureRequestDetail(prior.object.Feature_Request_ID);
-  ['productArea','featureTitle','problemStatement','businessCase','expectedBenefit','businessUrgency'].forEach(k=>{if(!cleanText_(form[k],5000))throw new Error(k.replace(/([A-Z])/g,' $1')+' is mandatory.');});if(!['Low','Medium','High'].includes(String(form.businessUrgency)))throw new Error('Choose a valid business urgency.');const link=validateHttpUrl_(form.supportingLink);
-  let attachment={id:'',name:'',url:''};attachment=saveAttachment_(form.attachment,'FR-PENDING-'+Utilities.getUuid(),user.email);let id='',committed=false,error=null;const lock=LockService.getScriptLock();lock.waitLock(10000);try{prior=featureRequestBySubmission_(requestId);if(prior){id=String(prior.object.Feature_Request_ID);}else{id=nextFeatureRequestId_();const now=new Date();appendObject_(APP.SHEETS.FEATURE_REQUESTS,{Feature_Request_ID:id,Created_At:now,Requested_By_Email:user.email,Requested_By_Name:user.name,Client_ID:safeSheetText_(form.clientId,50),Client_Name:safeSheetText_(form.clientName,200),Client_Type:safeSheetText_(form.clientType,30),Client_Size:safeSheetText_(form.clientSize,50),Product_Area:safeSheetText_(form.productArea,200),Feature_Title:safeSheetText_(form.featureTitle,300),Problem_Statement:safeSheetText_(form.problemStatement,5000),Business_Case:safeSheetText_(form.businessCase,5000),Expected_Benefit:safeSheetText_(form.expectedBenefit,5000),Business_Urgency:String(form.businessUrgency),Affected_Clients_Count:safeSheetText_(form.affectedClientsCount,50),Expected_Order_Volume:safeSheetText_(form.expectedOrderVolume,100),Revenue_Impact:safeSheetText_(form.revenueImpact,200),Current_Workaround:safeSheetText_(form.currentWorkaround,5000),Supporting_Link:safeSheetText_(link,2000),Attachment_File_ID:attachment.id,Attachment_File_Name:attachment.name,Attachment_URL:attachment.url,Status:'Submitted',Product_Priority:'Not Assigned',Product_Owner:'',Product_Response:'',Target_Timeline:'',Submission_Request_ID:requestId,Updated_At:now,Updated_By:user.email});appendObject_(APP.SHEETS.FEATURE_REQUEST_EVENTS,{Feature_Request_Event_ID:Utilities.getUuid(),Feature_Request_ID:id,Event_Type:'SUBMITTED',Old_Value:'',New_Value:'Submitted',Performed_By:user.email,Note:'',Request_ID:requestId,Created_At:now});committed=true;}}catch(e){error=e;}finally{lock.releaseLock();}if(attachment.id&&!committed)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(e){console.error('Uncommitted attachment cleanup failed.');}if(error)throw error;return getFeatureRequestDetail(id);
+  ['productArea','featureTitle','businessCase','expectedBenefit'].forEach(k=>{if(!cleanText_(form[k],5000))throw new Error(k.replace(/([A-Z])/g,' $1')+' is mandatory.');});if(form.businessUrgency&&!['Low','Medium','High'].includes(String(form.businessUrgency)))throw new Error('Choose a valid business urgency.');const link=validateHttpUrl_(form.supportingLink),businessCase=cleanText_(form.businessCase,5000),problemStatement=cleanText_(form.problemStatement,5000)||businessCase;
+  let attachment={id:'',name:'',url:''};attachment=saveAttachment_(form.attachment,'FR-PENDING-'+Utilities.getUuid(),user.email);let id='',committed=false,error=null;const lock=LockService.getScriptLock();lock.waitLock(10000);try{prior=featureRequestBySubmission_(requestId);if(prior){id=String(prior.object.Feature_Request_ID);}else{id=nextFeatureRequestId_();const now=new Date();appendObject_(APP.SHEETS.FEATURE_REQUESTS,{Feature_Request_ID:id,Created_At:now,Requested_By_Email:user.email,Requested_By_Name:user.name,Client_ID:safeSheetText_(form.clientId,50),Client_Name:safeSheetText_(form.clientName,200),Client_Type:safeSheetText_(form.clientType,30),Client_Size:safeSheetText_(form.clientSize,50),Product_Area:safeSheetText_(form.productArea,200),Feature_Title:safeSheetText_(form.featureTitle,300),Problem_Statement:safeSheetText_(problemStatement,5000),Business_Case:safeSheetText_(businessCase,5000),Expected_Benefit:safeSheetText_(form.expectedBenefit,5000),Business_Urgency:String(form.businessUrgency||''),Affected_Clients_Count:safeSheetText_(form.affectedClientsCount,50),Expected_Order_Volume:safeSheetText_(form.expectedOrderVolume,100),Revenue_Impact:safeSheetText_(form.revenueImpact||form.revenueOrderEstimate,200),Current_Workaround:safeSheetText_(form.currentWorkaround,5000),Supporting_Link:safeSheetText_(link,2000),Attachment_File_ID:attachment.id,Attachment_File_Name:attachment.name,Attachment_URL:attachment.url,Status:'Submitted',Product_Priority:'Not Assigned',Product_Owner:'',Product_Response:'',Target_Timeline:'',Submission_Request_ID:requestId,Updated_At:now,Updated_By:user.email});appendObject_(APP.SHEETS.FEATURE_REQUEST_EVENTS,{Feature_Request_Event_ID:Utilities.getUuid(),Feature_Request_ID:id,Event_Type:'SUBMITTED',Old_Value:'',New_Value:'Submitted',Performed_By:user.email,Note:'',Request_ID:requestId,Created_At:now});committed=true;}}catch(e){error=e;}finally{lock.releaseLock();}if(attachment.id&&!committed)try{DriveApp.getFileById(attachment.id).setTrashed(true);}catch(e){console.error('Uncommitted attachment cleanup failed.');}if(error)throw error;return getFeatureRequestDetail(id);
 }
 function getFeatureRequests(options){requireUser_();options=options||{};const search=lower_(options.search),rows=getSheetObjects_(APP.SHEETS.FEATURE_REQUESTS).filter(r=>(!search||[r.Feature_Request_ID,r.Product_Area,r.Feature_Title,r.Requested_By_Email,r.Client_Name,r.Status,r.Product_Response].some(v=>lower_(v).includes(search)))&&(!options.productArea||String(r.Product_Area)===String(options.productArea))&&(!options.status||String(r.Status)===String(options.status))&&(!options.urgency||String(r.Business_Urgency)===String(options.urgency))&&(!options.productPriority||String(r.Product_Priority)===String(options.productPriority))&&(!options.requestedBy||lower_(r.Requested_By_Email).includes(lower_(options.requestedBy)))).sort((a,b)=>toDate_(b.Created_At)-toDate_(a.Created_At));const page=paginate_(rows,options.page,options.pageSize);page.rows=page.rows.map(serializeFeatureRequest_);return page;}
 function getFeatureRequestDetail(id){requireUser_();const found=findObjectRow_(APP.SHEETS.FEATURE_REQUESTS,'Feature_Request_ID',id);if(!found)throw new Error('Feature request not found.');const result=serializeFeatureRequest_(found.object);result.events=getMatchingRows_(APP.SHEETS.FEATURE_REQUEST_EVENTS,'Feature_Request_ID',id).sort((a,b)=>toDate_(a.Created_At)-toDate_(b.Created_At)).map(e=>({eventType:String(e.Event_Type),oldValue:String(e.Old_Value||''),newValue:String(e.New_Value||''),performedBy:String(e.Performed_By),note:String(e.Note||''),createdAt:formatDateTime_(e.Created_At)}));return result;}

@@ -1,6 +1,6 @@
 const assert=require('assert'),fs=require('fs');
 const code=fs.readFileSync('Code.js','utf8'),setup=fs.readFileSync('Setup.js','utf8'),html=fs.readFileSync('Index.html','utf8');
-assert(setup.includes("const CURRENT_SCHEMA_VERSION = 8"));
+assert(setup.includes("const CURRENT_SCHEMA_VERSION = 9"));
 ['Category_Group','Subcategory_Name','Visible_In_Form','Sort_Order','FeatureRequests','FeatureRequestEvents'].forEach(x=>assert(setup.includes(x)));
 ['360-SHOPIFY-STORE-CONNECTION','360-WOOCOMMERCE-CONNECTION','upgradeTaxonomyAndFeatureRequests'].forEach(x=>assert(setup.includes(x)));
 ['submitFeatureRequest','getFeatureRequests','getFeatureRequestDetail','updateFeatureRequest','getAllTickets'].forEach(x=>assert(new RegExp(`function ${x}\\(`).test(code)));

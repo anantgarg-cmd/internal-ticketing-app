@@ -31,9 +31,9 @@ assert(html.includes("showPage(data.user.role==='SALES'?'raisePage':'queuePage')
 assert(html.includes("setTimeout(()=>{QUEUE_STATE.page=1;loadQueue(true);},300)"));
 assert(html.includes("Loading your workspace…"));
 assert(html.includes("crypto?.randomUUID"));
-assert(html.includes("Uploading evidence and creating your ticket…"));
+assert(html.includes("Creating ticket…"));
 assert(html.includes("Client Size"));
 assert(html.includes("localStorage.setItem('sf-sidebar-collapsed'"));
-assert(html.includes('For 360 clients, priority and SLA are based on client size.'));
-assert(html.includes('size.slaHours'));
+assert(html.includes('Priority and SLA come from Client Size.'));
+assert(html.includes('size?.slaHours'));
 console.log('client-size/performance static checks passed');

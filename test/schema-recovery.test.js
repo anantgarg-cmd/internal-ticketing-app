@@ -8,7 +8,7 @@ const sheets = ['Tickets','Clients','Categories','Users','TicketEvents','Setting
 const functions = ['ensureRuntimeSchema_','repairApplicationSchema','runSchemaMigrations_','ensureSheetSchema_','appendMissingColumns_','seedMissingConfigurationRows_','validateCompleteSchema_','getRequiredSheet_','validateApplicationSchema'];
 sheets.forEach(name => assert(setup.includes(`'${name}'`), `central schema missing ${name}`));
 functions.forEach(name => assert.match(setup, new RegExp(`function ${name}\\(`), `missing ${name}`));
-assert.match(setup, /const CURRENT_SCHEMA_VERSION = 8;/);
+assert.match(setup, /const CURRENT_SCHEMA_VERSION = 9;/);
 assert.match(setup, /'Priority_Source','SLA_Source','Submission_Request_ID'/);
 assert.match(setup, /'Priority','SLA_Hours','Active','Sort_Order'/);
 assert.match(setup, /getSheets\(\).*getName/);
