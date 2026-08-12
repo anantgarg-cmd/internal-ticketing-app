@@ -3,7 +3,7 @@
  * Do not put passwords or the Slack webhook directly in this file.
  */
 
-const APP_RELEASE = 'filter-ux-stability-v1';
+const APP_RELEASE = 'category-sla-reopen-fix-v1';
 const APP_COMMIT = '__APP_COMMIT__';
 let SPREADSHEET_INSTANCE_ = null;
 let SLA_SCHEMA_RECOVERY_FAILED_ = false;
@@ -137,15 +137,18 @@ function getReopenPreview(ticketId) {
   const found = findObjectRow_(APP.SHEETS.TICKETS, 'Ticket_ID', ticketId);
   if (!found) throw new Error('Ticket not found.');
   assertCanReopen_(user, found.object);
-  const dueAt = calculateWorkingSlaDueAt_(new Date(), number_(found.object.SLA_Hours, 0));
-  return { dueAt: formatDateTime_(dueAt), dueAtIso: dueAt.toISOString() };
+  const resolution = resolveReopenTicketPriority_(found.object);
+  const dueAt = calculateWorkingSlaDueAt_(new Date(), resolution.slaHours);
+  return { dueAt: formatDateTime_(dueAt), dueAtIso: dueAt.toISOString(), priority: resolution.priority, slaHours: resolution.slaHours };
 }
 
 /** Reopens one resolved ticket and starts an independent SLA cycle. */
 
 function assertCanReopen_(user, ticket) {
   if (String(ticket.Status) !== APP.STATUS.RESOLVED) throw new Error('Only a Resolved ticket can be reopened.');
-  if (![APP.ROLES.POC, APP.ROLES.ADMIN].includes(user.role) && lower_(ticket.Raiser_Email) !== user.email) {
+  const manager=[APP.ROLES.POC, APP.ROLES.ADMIN].includes(user.role);
+  const ownSalesTicket=user.role===APP.ROLES.SALES&&lower_(ticket.Raiser_Email)===lower_(user.email);
+  if (!manager && !ownSalesTicket) {
     throw new Error('You are not allowed to perform this action.');
   }
 }
@@ -857,20 +860,26 @@ function getActiveClientSizePriorities_(forceRefresh) {
 }
 
 function resolveTicketPriority_(clientType, clientSizeCode, category) {
-  if (String(clientType) === '360') {
-    const code = String(clientSizeCode || '');
-    let size = getActiveClientSizePriorities_().find(row => row.code === code);
-    if (!size) size = getActiveClientSizePriorities_(true).find(row => row.code === code);
-    if (!size) throw new Error('The selected client size is no longer active. Refresh the page and choose an active client size.');
-    if (!['CRITICAL','HIGH','MEDIUM','LOW'].includes(size.priority)) throw new Error('The selected Client Size has an invalid configured priority.');
-    if (!(size.slaHours > 0)) throw new Error('The selected Client Size has invalid configured SLA hours.');
-    return { clientSize: size.code, priority: size.priority, prioritySource: 'CLIENT_SIZE', slaHours: size.slaHours, slaSource: 'CLIENT_SIZE' };
-  }
   const priority = String(category.Priority || '').trim().toUpperCase();
   const slaHours = Number(category.SLA_Hours);
   if (!['CRITICAL','HIGH','MEDIUM','LOW'].includes(priority)) throw new Error('The selected Subcategory has an invalid configured priority.');
   if (!Number.isFinite(slaHours) || !(slaHours > 0)) throw new Error('The selected Subcategory has invalid configured SLA hours.');
-  return { clientSize: '', priority, prioritySource: 'CATEGORY', slaHours, slaSource: 'CATEGORY' };
+  return { clientSize: String(clientSizeCode || ''), priority, prioritySource: 'CATEGORY', slaHours, slaSource: 'CATEGORY' };
+}
+
+/** Resolve a fresh cycle from category configuration, including hidden historical rows. */
+function resolveReopenTicketPriority_(ticket) {
+  const rows=getSheetObjects_(APP.SHEETS.CATEGORIES),id=String(ticket.Category_ID||'');
+  let category=rows.find(row=>String(row.Category_ID)===id);
+  if(!category){
+    const key=normalizedCategoryKey_(ticket.Client_Type,ticket.Category_Group||ticket.Category_Name,ticket.Subcategory_Name||ticket.Category_Name);
+    category=rows.find(row=>normalizedCategoryKey_(row.Client_Type,row.Category_Group||row.Category_Name,row.Subcategory_Name||row.Category_Name)===key);
+  }
+  if(category){
+    try{return resolveTicketPriority_(ticket.Client_Type,ticket.Client_Size,category);}catch(error){console.warn('Configured category could not be used for reopen '+String(ticket.Ticket_ID||'')+': '+error.message);}
+  }
+  console.warn('Using stored ticket SLA fallback for reopen '+String(ticket.Ticket_ID||'')+'; no safe category configuration was resolved.');
+  return resolveTicketPriority_(ticket.Client_Type,ticket.Client_Size,{Priority:ticket.Priority,SLA_Hours:ticket.SLA_Hours});
 }
 
 function buildBootstrap_(user) {
@@ -1005,7 +1014,7 @@ function getTicketSlaCycles_(ticketId) { try{return getMatchingRows_(APP.SHEETS.
 
 function getTicketDetail(ticketId) {
   const startedAt=Date.now(),user=requireUser_(),found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',ticketId); if(!found)throw new Error('Ticket not found.');
-  const result=serializeTicket_(found.object); result.dynamicFields=safeJsonParse_(found.object.Dynamic_Fields_JSON,{}); result.slaCycles=getTicketSlaCycles_(ticketId).map(serializeSlaCycle_); result.slaCycleNumber=result.slaCycles.reduce((m,c)=>Math.max(m,c.cycleNumber),0); result.reopenCount=result.slaCycles.filter(c=>c.cycleType==='REOPEN').length; result.canReopen=String(found.object.Status)===APP.STATUS.RESOLVED&&([APP.ROLES.POC,APP.ROLES.ADMIN].includes(user.role)||lower_(found.object.Raiser_Email)===user.email); result.events=getMatchingRows_(APP.SHEETS.EVENTS,'Ticket_ID',ticketId).sort((a,b)=>toDate_(a.Created_At)-toDate_(b.Created_At)).map(e=>({eventType:String(e.Event_Type),oldValue:String(e.Old_Value||''),newValue:String(e.New_Value||''),performedBy:String(e.Performed_By||''),createdAt:formatDateTime_(e.Created_At),note:String(e.Note||'')})); logPerformance_('getTicketDetail',startedAt,{rows:1}); return result;
+  const result=serializeTicket_(found.object); result.dynamicFields=safeJsonParse_(found.object.Dynamic_Fields_JSON,{}); result.slaCycles=getTicketSlaCycles_(ticketId).map(serializeSlaCycle_); result.slaCycleNumber=result.slaCycles.reduce((m,c)=>Math.max(m,c.cycleNumber),0); result.reopenCount=result.slaCycles.filter(c=>c.cycleType==='REOPEN').length; result.canReopen=String(found.object.Status)===APP.STATUS.RESOLVED&&([APP.ROLES.POC,APP.ROLES.ADMIN].includes(user.role)||(user.role===APP.ROLES.SALES&&lower_(found.object.Raiser_Email)===lower_(user.email))); result.events=getMatchingRows_(APP.SHEETS.EVENTS,'Ticket_ID',ticketId).sort((a,b)=>toDate_(a.Created_At)-toDate_(b.Created_At)).map(e=>({eventType:String(e.Event_Type),oldValue:String(e.Old_Value||''),newValue:String(e.New_Value||''),performedBy:String(e.Performed_By||''),createdAt:formatDateTime_(e.Created_At),note:String(e.Note||'')})); logPerformance_('getTicketDetail',startedAt,{rows:1}); return result;
 }
 
 function getNumbers() {
@@ -1052,7 +1061,7 @@ function updateTicketStatus(payload) {
 
 function reopenTicket(payload) {
   const startedAt=Date.now(),user=requireUser_();if(!payload||!payload.ticketId)throw new Error('Ticket is required.');const reason=cleanText_(payload.reopenReason,5001),requestId=cleanText_(payload.actionRequestId,100);if(!reason||reason.length>5000)throw new Error('A reopening reason of at most 5,000 characters is mandatory.');if(!requestId)throw new Error('Action_Request_ID is required.');let prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);
-  const lock=LockService.getScriptLock(),wait=Date.now();lock.waitLock(10000);try{prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);const found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',payload.ticketId);if(!found)throw new Error('Ticket not found.');const ticket=found.object;assertCanReopen_(user,ticket);ensureLegacyInitialCycle_(ticket);const cycles=getTicketSlaCycles_(payload.ticketId);if(cycles.some(c=>String(c.SLA_Result)==='OPEN'))throw new Error('This ticket already has an open SLA cycle.');const now=new Date(),due=calculateWorkingSlaDueAt_(now,number_(ticket.SLA_Hours,0)),cycle=cycles.reduce((m,c)=>Math.max(m,number_(c.Cycle_Number,0)),0)+1,changes={Status:APP.STATUS.REOPENED,SLA_Due_At:due,SLA_Result:'',Updated_At:now,Updated_By:user.email,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',Current_SLA_Cycle:cycle};updateObjectRow_(APP.SHEETS.TICKETS,found.rowNumber,changes);appendSlaCycle_({Ticket_ID:payload.ticketId,Cycle_Number:cycle,Cycle_Type:'REOPEN',Started_At:now,Due_At:due,SLA_Result:'OPEN',Started_By:user.email,Reopen_Reason:reason,Created_At:now,Updated_At:now});appendEvent_(payload.ticketId,'TICKET_REOPENED',APP.STATUS.RESOLVED,APP.STATUS.REOPENED,user.email,reason,now,requestId);upsertTicketIndex_(Object.assign({},ticket,changes));invalidateTicketCaches_();}finally{lock.releaseLock();}const detail=getTicketDetail(payload.ticketId);try{sendSlackReopenedAlert_(detail,user.email,reason);}catch(err){console.error('Slack reopen alert failed.');}logPerformance_('reopenTicket',startedAt,{rows:1,lockWaitMs:Date.now()-wait});return detail;
+  const lock=LockService.getScriptLock(),wait=Date.now();lock.waitLock(10000);try{prior=findEventByRequestId_(requestId);if(prior)return getTicketDetail(prior.object.Ticket_ID);const found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',payload.ticketId);if(!found)throw new Error('Ticket not found.');const ticket=found.object;assertCanReopen_(user,ticket);ensureLegacyInitialCycle_(ticket);const cycles=getTicketSlaCycles_(payload.ticketId);if(cycles.some(c=>String(c.SLA_Result)==='OPEN'))throw new Error('This ticket already has an open SLA cycle.');const resolution=resolveReopenTicketPriority_(ticket),now=new Date(),due=calculateWorkingSlaDueAt_(now,resolution.slaHours),cycle=cycles.reduce((m,c)=>Math.max(m,number_(c.Cycle_Number,0)),0)+1,changes={Status:APP.STATUS.REOPENED,Priority:resolution.priority,Priority_Source:'CATEGORY',SLA_Hours:resolution.slaHours,SLA_Source:'CATEGORY',SLA_Due_At:due,SLA_Result:'',Updated_At:now,Updated_By:user.email,Picked_Up_By:'',Picked_Up_At:'',Investigating_At:'',Resolution_Note:'',Root_Cause:'',Resolved_By:'',Resolved_At:'',Current_SLA_Cycle:cycle};updateObjectRow_(APP.SHEETS.TICKETS,found.rowNumber,changes);appendSlaCycle_({Ticket_ID:payload.ticketId,Cycle_Number:cycle,Cycle_Type:'REOPEN',Started_At:now,Due_At:due,SLA_Result:'OPEN',Started_By:user.email,Reopen_Reason:reason,Created_At:now,Updated_At:now});appendEvent_(payload.ticketId,'TICKET_REOPENED',APP.STATUS.RESOLVED,APP.STATUS.REOPENED,user.email,reason,now,requestId);upsertTicketIndex_(Object.assign({},ticket,changes));invalidateTicketCaches_();}finally{lock.releaseLock();}const detail=getTicketDetail(payload.ticketId);try{sendSlackReopenedAlert_(detail,user.email,reason);}catch(err){console.error('Slack reopen alert failed.');}logPerformance_('reopenTicket',startedAt,{rows:1,lockWaitMs:Date.now()-wait});return detail;
 }
 
 // -------------------- Feature Requests (intentionally independent of ticket SLA/Slack) --------------------
