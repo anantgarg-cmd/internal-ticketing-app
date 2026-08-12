@@ -143,7 +143,7 @@ label{font-size:12px;font-weight:600;display:block;margin-bottom:7px}.required:a
   let FEATURE_STATE={page:1,pageSize:50,filterOptions:null};
   let IN_FLIGHT=new Set(), SUBMISSION_REQUEST_ID='', SCHEMA_STARTUP_RETRIED=false, LAST_DRAWER_TRIGGER=null, DRAWER_WRITING=false, DRAFT_TIMER=null;
   let QUEUE_STATE = { page: 1, pageSize: 50, totalRows: 0, totalPages: 1, categories: [] };
-  const EXPECTED_RELEASE = 'filter-ux-stability-v1';
+  const EXPECTED_RELEASE = 'category-sla-reopen-fix-v1';
   const GLOBAL_LOADER_TOKENS=new Map();
   const FRONTEND_COMMIT = '__APP_COMMIT__';
   const VERSION_MISMATCH_MESSAGE = 'This web-app URL is running mismatched frontend and backend versions. Please contact the application administrator and share the URL being used.';
@@ -162,7 +162,7 @@ label{font-size:12px;font-weight:600;display:block;margin-bottom:7px}.required:a
     document.querySelectorAll('input[name="clientMode"]').forEach(x => x.addEventListener('change', clientModeChanged));
     document.getElementById('clientType').addEventListener('change', refreshCategories);
     document.getElementById('categoryGroup').addEventListener('change', categoryGroupChanged);
-    document.getElementById('categoryId').addEventListener('change', categoryChanged); document.getElementById('clientSize').addEventListener('change',categoryChanged);
+    document.getElementById('categoryId').addEventListener('change', categoryChanged);
     ['nDays','nRaisedBy','nClientType','nPriority'].forEach(id=>document.getElementById(id)?.addEventListener('change',()=>loadNumbers(true)));
     ['qStatus','qPriority','qCategory','qSubcategory','qClientSize','qSla','qPickedUpBy'].forEach(id => document.getElementById(id)?.addEventListener('change',()=>{if(id==='qCategory')cascadeQueueCategory();QUEUE_STATE.page=1;loadQueue(true);}));
     document.getElementById('qSearch').addEventListener('input',()=>{clearTimeout(SEARCH_TIMER);SEARCH_TIMER=setTimeout(()=>{QUEUE_STATE.page=1;loadQueue(true);},300);});
@@ -327,8 +327,8 @@ label{font-size:12px;font-weight:600;display:block;margin-bottom:7px}.required:a
     if(!cat){document.getElementById('slaSummary').style.display='none';return;}
     cat.fields.filter(key=>key!=='attachment').slice(0,3).forEach(key=>{const [label,type,placeholder]=FIELD_DEFS[key]||[key,'text',''],required=cat.requiredFields.includes(key);const input=type==='textarea'?`<textarea name="${key}" placeholder="${escAttr(placeholder)}" ${required?'required':''}></textarea>`:`<input type="${type}" name="${key}" placeholder="${escAttr(placeholder)}" ${required?'required':''}>`;box.insertAdjacentHTML('beforeend',`<div class="${type==='textarea'?'full':''}"><label class="${required?'required':''}">${esc(label)}</label>${input}</div>`);});
     const evidenceRequired=cat.requiredFields.includes('attachment'),evidence=document.querySelector('.evidence-control');evidence.querySelector('label').classList.toggle('required',evidenceRequired);evidence.dataset.required=String(evidenceRequired);
-    initUploadZone();const is360=selectedClientType()==='360',size=BOOT.clientSizes.find(x=>x.code===document.getElementById('clientSize').value),priority=is360?(size?.priority||'Select Client Size'):cat.priority,sla=is360?(size?.slaHours||'Select Client Size'):cat.slaHours;document.getElementById('summaryPriority').textContent=priority;document.getElementById('summarySla').textContent=sla;document.getElementById('priorityExplanation').textContent=is360?'Priority and SLA come from Client Size.':'Priority and SLA come from the selected Subcategory.';document.getElementById('slaSummary').style.display='block';
-    const due=document.getElementById('summaryDue'),categoryId=cat.id,sizeCode=is360?(size?.code||''):'';due.textContent='Calculating…';if(is360&&!sizeCode){due.textContent='Select Client Size';return;}google.script.run.withSuccessHandler(result=>{if(document.getElementById('categoryId').value===categoryId)due.textContent=result.dueAt;}).withFailureHandler(()=>{if(document.getElementById('categoryId').value===categoryId)due.textContent='Unavailable';}).getSlaDuePreview(categoryId,sizeCode);
+    initUploadZone();const is360=selectedClientType()==='360',size=BOOT.clientSizes.find(x=>x.code===document.getElementById('clientSize').value),priority=cat.priority,sla=cat.slaHours;document.getElementById('summaryPriority').textContent=priority;document.getElementById('summarySla').textContent=sla;document.getElementById('priorityExplanation').textContent='Priority and SLA come from the selected Subcategory.';document.getElementById('slaSummary').style.display='block';
+    const due=document.getElementById('summaryDue'),categoryId=cat.id,sizeCode=is360?(size?.code||''):'';due.textContent='Calculating…';google.script.run.withSuccessHandler(result=>{if(document.getElementById('categoryId').value===categoryId)due.textContent=result.dueAt;}).withFailureHandler(()=>{if(document.getElementById('categoryId').value===categoryId)due.textContent='Unavailable';}).getSlaDuePreview(categoryId,sizeCode);
   }
 
   function beginSubmit(e){

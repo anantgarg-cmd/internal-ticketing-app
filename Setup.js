@@ -28,7 +28,7 @@ const APP = Object.freeze({
       'Category_ID','Category_Name','Email_Subject','Normalized_Subject','Issue_Description','Priority','SLA_Hours',
       'SLA_Due_At','Status','Picked_Up_By','Picked_Up_At','Investigating_At','Resolution_Note','Root_Cause',
       'Resolved_By','Resolved_At','SLA_Result','Duplicate_Of','Duplicate_Override','Dynamic_Fields_JSON',
-      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Client_Size','Priority_Source','SLA_Source','Submission_Request_ID','Category_Group','Subcategory_Name'
+      'Attachment_File_ID','Attachment_File_Name','Attachment_URL','Updated_At','Updated_By','Client_Size','Priority_Source','SLA_Source','Submission_Request_ID','Category_Group','Subcategory_Name','Current_SLA_Cycle'
     ],
     Clients: ['Client_ID','Client_Name','Client_Type','Active'],
     Categories: ['Category_ID','Client_Type','Category_Name','Priority','SLA_Hours','Fields_JSON','Required_Fields_JSON','Active','Category_Group','Subcategory_Name','Visible_In_Form','Sort_Order'],
@@ -48,9 +48,9 @@ const APP = Object.freeze({
 });
 
 // Version 6 is already the client-size SLA release; Slack is the next additive migration.
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
-const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v9';
+const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v10';
 const SCHEMA_UPGRADE_IN_PROGRESS_ = 'SCHEMA_UPGRADE_IN_PROGRESS';
 const SCHEMA_TEMPORARY_MESSAGE_ = 'The application structure is being upgraded. Please refresh once after a few seconds.';
 const SCHEMA_ADMIN_MESSAGE_ = 'The application structure could not be prepared automatically. Please ask the administrator to run repairApplicationSchema() from Apps Script.';
@@ -416,10 +416,78 @@ function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
   if (toVersion >= 7) { ensure([APP.SHEETS.SLACK_NOTIFICATIONS, APP.SHEETS.SETTINGS]); seedMissingConfigurationRows_(ss, report); }
   if (toVersion >= 8) { ensure([APP.SHEETS.CATEGORIES,APP.SHEETS.TICKETS,APP.SHEETS.TICKET_INDEX,APP.SHEETS.FEATURE_REQUESTS,APP.SHEETS.FEATURE_REQUEST_EVENTS]); seedMissingTaxonomyRows_(ss,report); migrateRootCauses_(ss,report); }
   if (fromVersion < 9 && toVersion >= 9) { ensure([APP.SHEETS.CATEGORIES]); const simplified=simplifyKnownTaxonomyRows_(ss); report.configurationRowsSeeded.SimplifiedTaxonomy=simplified; }
+  if (fromVersion < 10 && toVersion >= 10) {
+    ensure([APP.SHEETS.TICKETS, APP.SHEETS.TICKET_INDEX, APP.SHEETS.CATEGORIES]);
+    report.configurationRowsSeeded.CategorySlaV10=upsertCategorySlaV10_(ss);
+  }
   const indexResult = backfillTicketIndexIfNeeded_(ss);
   report.ticketIndexRowsCreated += indexResult.created;
   if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');
   return { summary: report, indexComplete: indexResult.complete };
+}
+
+/** Final Sheet release snapshot. SLA days are converted generically to eight-hour working days. */
+const CATEGORY_SLA_V10_ = Object.freeze([
+  ['360','API Integration','API Error / Invalid Response','HIGH',1],
+  ['360','API Integration','New Integration / Webhook Setup','LOW',3],
+  ['360','API Integration','Serviceability / Pincode / TAT Issue','MEDIUM',2],
+  ['360','Bank Account Verification','Bank Account Verification','LOW',3],
+  ['360','Billing, COD, Wallet & GST','COD Remittance / UTR Issue','HIGH',1],
+  ['360','Billing, COD, Wallet & GST','Charges / Wallet / Gems Issue','MEDIUM',2],
+  ['360','Billing, COD, Wallet & GST','GST Invoice Issue','MEDIUM',2],
+  ['360','CP Account & Mapping','CP Account / Seller Mapping Issue','MEDIUM',2],
+  ['360','CP Account & Mapping','Other CP Issue','MEDIUM',2],
+  ['360','Labels Issue','Label Not Generated / Incorrect','MEDIUM',2],
+  ['360','Orders & Tracking','Order Creation / Bulk Upload Failure','HIGH',1],
+  ['360','Orders & Tracking','Tracking / Status Issue','MEDIUM',2],
+  ['360','Other','Other 360 / CP Issue','LOW',3],
+  ['360','Portal','Login / OTP / Access Issue','MEDIUM',2],
+  ['360','Portal','Portal Features Not Working','MEDIUM',2],
+  ['360','Shopify','Shopify Orders / Status Not Syncing','HIGH',1],
+  ['360','Shopify','Connect / Delink Shopify Store','LOW',3],
+  ['Regular','API Integration','Order creation API Issue / Failure','HIGH',1],
+  ['Regular','API Integration','API Authentication Issue','HIGH',1],
+  ['Regular','API Integration','Other API / QC Issue','MEDIUM',2],
+  ['Regular','API Integration','API O-Auth Credentials','MEDIUM',2],
+  ['Regular','API Integration','API Webhook Setup','MEDIUM',2],
+  ['Regular','API Integration','API Token','MEDIUM',2],
+  ['Regular','API Integration','API Callback Missing / Delayed','MEDIUM',2],
+  ['Regular','API Integration','New Integration','LOW',3],
+  ['Regular','API Integration','IP whitelisting','LOW',3],
+  ['Regular','API Integration','API Push Status Mapping Request','LOW',3],
+  ['Regular','Label / Barcode Issue','Label / Barcode Issue','MEDIUM',2],
+  ['Regular','Manual Order Placement Issue','Manual Upload - Order Not Created / Not Visible / Incorrect Order / Parent-Child Details','HIGH',1],
+  ['Regular','Other','Other Configuration / Technical Request','LOW',3],
+  ['Regular','Share Payloads','Order creation payload/ Callabck payload','LOW',3],
+  ['Regular','Testing Support','Add new pincode in staging','HIGH',1],
+  ['Regular','Testing Support','Status update in staging','HIGH',1]
+]);
+
+function categorySlaHoursFromDays_(days) { return Number(days) * 8; }
+function normalizedCategoryKey_(clientType, group, subcategory) {
+  const type=String(clientType||'').trim().toLowerCase()==='360/cp'?'360':String(clientType||'').trim();
+  const clean=value=>String(value||'').trim().replace(/\s+/g,' ').toLowerCase();
+  return [clean(type),clean(group),clean(subcategory)].join('|');
+}
+function upsertCategorySlaV10_(ss) {
+  const sheet=ss.getSheetByName(APP.SHEETS.CATEGORIES),width=sheet.getLastColumn();
+  const headers=sheet.getRange(1,1,1,width).getDisplayValues()[0].map(String),col=name=>headers.indexOf(name);
+  const values=sheet.getLastRow()>1?sheet.getRange(2,1,sheet.getLastRow()-1,width).getValues():[];
+  const byKey={},ids={};
+  values.forEach((row,index)=>{byKey[normalizedCategoryKey_(row[col('Client_Type')],row[col('Category_Group')]||row[col('Category_Name')],row[col('Subcategory_Name')]||row[col('Category_Name')])]={row,index:index+2};ids[String(row[col('Category_ID')])]=true;});
+  const desired={},added=[],updated=[];
+  CATEGORY_SLA_V10_.forEach((config,order)=>{
+    const type=String(config[0]).trim()==='360/CP'?'360':String(config[0]).trim(),group=config[1],subcategory=config[2],priority=String(config[3]).toUpperCase(),slaHours=categorySlaHoursFromDays_(config[4]),key=normalizedCategoryKey_(type,group,subcategory);
+    desired[key]=true;const match=byKey[key];
+    if(match){
+      [['Client_Type',type],['Category_Name',subcategory],['Category_Group',group],['Subcategory_Name',subcategory],['Priority',priority],['SLA_Hours',slaHours],['Active',true],['Visible_In_Form',true],['Sort_Order',order+1]].forEach(change=>{const column=col(change[0]);if(column>=0&&String(match.row[column])!==String(change[1])){sheet.getRange(match.index,column+1).setValue(change[1]);match.row[column]=change[1];}});updated.push(String(match.row[col('Category_ID')]));return;
+    }
+    let id='CAT-'+taxonomySlug_(type)+'-'+taxonomySlug_(group)+'-'+taxonomySlug_(subcategory),suffix=2;while(ids[id])id='CAT-'+taxonomySlug_(type)+'-'+taxonomySlug_(group)+'-'+taxonomySlug_(subcategory)+'-'+suffix++;
+    ids[id]=true;const object={Category_ID:id,Client_Type:type,Category_Name:subcategory,Priority:priority,SLA_Hours:slaHours,Fields_JSON:'[]',Required_Fields_JSON:'[]',Active:true,Category_Group:group,Subcategory_Name:subcategory,Visible_In_Form:true,Sort_Order:order+1};
+    sheet.getRange(sheet.getLastRow()+1,1,1,width).setValues([headers.map(header=>object[header]===undefined?'':object[header])]);added.push(id);
+  });
+  values.forEach((row,index)=>{const key=normalizedCategoryKey_(row[col('Client_Type')],row[col('Category_Group')]||row[col('Category_Name')],row[col('Subcategory_Name')]||row[col('Category_Name')]);if(!desired[key]&&col('Visible_In_Form')>=0&&String(row[col('Visible_In_Form')]).toUpperCase()!=='FALSE')sheet.getRange(index+2,col('Visible_In_Form')+1).setValue(false);});
+  return {added:added,updated:updated,obsoleteHidden:values.length-updated.filter((id,i,a)=>a.indexOf(id)===i).length};
 }
 
 /** Administrator-run, additive and idempotent taxonomy/feature-request upgrade. */

@@ -9,14 +9,14 @@ for (const value of [
   "['MEDIUM_SIZED','Medium-sized','ADL between 50 and 299',50,299,'MEDIUM',24,true,2]",
   "['SMALL_SIZED','Small-sized','ADL below 50',0,49,'LOW',48,true,3]"
 ]) assert(setup.includes(value), `missing seed ${value}`);
-assert(code.includes("prioritySource: 'CLIENT_SIZE'"));
+assert(!code.includes("prioritySource: 'CLIENT_SIZE'"));
 assert(code.includes("prioritySource: 'CATEGORY'"));
-assert(code.includes("slaSource: 'CLIENT_SIZE'"));
+assert(!code.includes("slaSource: 'CLIENT_SIZE'"));
 assert(code.includes("slaSource: 'CATEGORY'"));
 assert(code.includes('slaHours=resolution.slaHours'));
 assert(code.includes('SLA_Source:resolution.slaSource'));
-assert(code.includes("The selected client size is no longer active."));
-assert(code.includes("clientSize: ''"));
+assert(!code.includes("The selected client size is no longer active."));
+assert(code.includes("clientSize: String(clientSizeCode || '')"));
 assert(code.includes("APP.SHEETS.TICKET_INDEX"));
 assert(code.includes("Math.min(100"));
 assert(code.includes("The submission request ID was not submitted."));
@@ -34,6 +34,9 @@ assert(html.includes("crypto?.randomUUID"));
 assert(html.includes("Creating ticket…"));
 assert(html.includes("Client Size"));
 assert(html.includes("localStorage.setItem('sf-sidebar-collapsed'"));
-assert(html.includes('Priority and SLA come from Client Size.'));
-assert(html.includes('size?.slaHours'));
+assert(!html.includes('Priority and SLA come from Client Size.'));
+assert(html.includes('Priority and SLA come from the selected Subcategory.'));
+assert(html.includes('priority=cat.priority,sla=cat.slaHours'));
+assert(!html.includes('if(is360&&!sizeCode)'));
+assert(!html.includes("getElementById('clientSize').addEventListener('change',categoryChanged)"));
 console.log('client-size/performance static checks passed');
