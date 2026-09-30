@@ -18,8 +18,8 @@ vm.runInContext(setup.replace(/^const APP = Object\.freeze\([\s\S]*?^\}\);/m,'')
 assert.equal(context.categorySlaHoursFromDays_(1),8);
 assert.equal(context.categorySlaHoursFromDays_(2),16);
 assert.equal(context.categorySlaHoursFromDays_(3),24);
-assert.match(setup,/const CURRENT_SCHEMA_VERSION = 10;/);
-assert.match(setup,/SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v10'/);
+assert.match(setup,/const CURRENT_SCHEMA_VERSION = 11;/);
+assert.match(setup,/SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v11'/);
 assert.match(setup,/Subcategory_Name','Current_SLA_Cycle'/);
 assert.match(setup,/fromVersion < 10 && toVersion >= 10/);
 assert.match(code,/resolveReopenTicketPriority_\(ticket\)/);

@@ -286,6 +286,7 @@ function validateTicketForm_(form, category, client) {
   const visibleFields = safeJsonParse_(category.Fields_JSON, []), required = safeJsonParse_(category.Required_Fields_JSON, []);
   const evidenceLink = validateHttpUrl_(form.evidence_link, 'Screenshot or video link');
   const hasEvidence = hasFile_(form.attachment) || Boolean(evidenceLink);
+  if (String(category.Client_Type)==='360'&&String(category.Category_Group)==='Bank Account Change'&&String(category.Subcategory_Name||category.Category_Name)==='Bank Account Change') validateBankAccountChange_(form);
   required.forEach(field => {
     if (field === 'attachment') {
       if (!hasEvidence && !(visibleFields.includes('api_log') && cleanText_(form.api_log, 10000))) throw new Error('Add a screenshot, file or video link.');
@@ -299,6 +300,26 @@ function validateTicketForm_(form, category, client) {
   Object.keys(form).forEach(key => {
     if (key.startsWith('dynamic_') && !deprecated.includes(key.replace('dynamic_','')) && !visibleFields.includes(key.replace('dynamic_',''))) throw new Error('Unexpected field received. Refresh the page and try again.');
   });
+}
+
+
+function isBankAccountChangeCategory_(category) {
+  return Boolean(category&&String(category.Client_Type)==='360'&&String(category.Category_Group)==='Bank Account Change'&&String(category.Subcategory_Name||category.Category_Name)==='Bank Account Change');
+}
+function validateBankAccountChange_(form) {
+  const email=String(form.registered_email_id||'').trim(),mobile=String(form.registered_mobile_number||'').trim(),account=String(form.bank_account_number||'').trim(),confirmation=String(form.confirm_bank_account_number||'').trim(),ifsc=String(form.ifsc_code||'').trim().toUpperCase();
+  if(!email)throw new Error('Registered Email ID is required.');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new Error('Enter a valid Registered Email ID.');
+  if(mobile&&!/^\d{10}$/.test(mobile))throw new Error('Registered Mobile Number must contain exactly 10 digits.');
+  if(!/^\d{8,18}$/.test(account))throw new Error('Bank Account Number must contain 8–18 digits.');
+  if(!confirmation)throw new Error('Re-enter Bank Account Number is required.');
+  if(account!==confirmation)throw new Error('Bank account numbers do not match.');
+  if(!cleanText_(form.account_holder_name,200))throw new Error('Account Holder Name is required.');
+  if(!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc))throw new Error('Enter a valid 11-character IFSC Code.');
+  if(!cleanText_(form.bank_name,200))throw new Error('Bank Name is required.');
+  if(!hasFile_(form.attachment))throw new Error('Upload a cancelled cheque or bank passbook front page.');
+  if(!['true','on','accepted'].includes(String(form.bank_declaration||'').toLowerCase()))throw new Error('Accept the bank account declaration to continue.');
+  form.ifsc_code=ifsc;
 }
 
 function resolveClient_(form, expectedClientType) {
@@ -428,7 +449,7 @@ function getActiveCategories_() {
       subcategoryName: String(r.Subcategory_Name || r.Category_Name),
       visibleInForm: String(r.Visible_In_Form).trim() === '' || truthy_(r.Visible_In_Form),
       sortOrder: number_(r.Sort_Order, 9999)
-    }));
+    })).sort((a,b)=>a.clientType.localeCompare(b.clientType)||a.sortOrder-b.sortOrder||a.id.localeCompare(b.id));
   putCachedJson_(CACHE_KEYS_.CATEGORIES, categories, 300);
   return categories;
 }
@@ -710,13 +731,17 @@ function countBy_(rows, key) {
 function extractDynamicFields_(form, category) {
   const fields = safeJsonParse_(category.Fields_JSON, []);
   const result = {};
-  fields.filter(f => f !== 'attachment').forEach(field => {
-    const value = cleanText_(form[field], 10000);
+  fields.filter(f => f !== 'attachment' && f !== 'confirm_bank_account_number').forEach(field => {
+    const value = field==='bank_declaration'&&['true','on','accepted'].includes(String(form[field]||'').toLowerCase())?'Accepted':cleanText_(form[field], 10000);
     if (value) result[field] = value;
   });
   const evidenceLink=cleanText_(form.evidence_link,2000);if(evidenceLink)result.evidence_link=evidenceLink;
   return result;
 }
+
+
+function maskBankAccountNumber_(value){const digits=String(value||'').replace(/\D/g,'');return digits?'********'+digits.slice(-4):'';}
+function maskSensitiveDynamicFields_(fields){const safe=Object.assign({},fields||{});if(Object.prototype.hasOwnProperty.call(safe,'bank_account_number'))safe.bank_account_number=maskBankAccountNumber_(safe.bank_account_number);delete safe.confirm_bank_account_number;return safe;}
 
 // -------------------- Duplicate matching --------------------
 
@@ -1014,7 +1039,7 @@ function getTicketSlaCycles_(ticketId) { try{return getMatchingRows_(APP.SHEETS.
 
 function getTicketDetail(ticketId) {
   const startedAt=Date.now(),user=requireUser_(),found=findObjectRow_(APP.SHEETS.TICKETS,'Ticket_ID',ticketId); if(!found)throw new Error('Ticket not found.');
-  const result=serializeTicket_(found.object); result.dynamicFields=safeJsonParse_(found.object.Dynamic_Fields_JSON,{}); result.slaCycles=getTicketSlaCycles_(ticketId).map(serializeSlaCycle_); result.slaCycleNumber=result.slaCycles.reduce((m,c)=>Math.max(m,c.cycleNumber),0); result.reopenCount=result.slaCycles.filter(c=>c.cycleType==='REOPEN').length; result.canReopen=String(found.object.Status)===APP.STATUS.RESOLVED&&([APP.ROLES.POC,APP.ROLES.ADMIN].includes(user.role)||(user.role===APP.ROLES.SALES&&lower_(found.object.Raiser_Email)===lower_(user.email))); result.events=getMatchingRows_(APP.SHEETS.EVENTS,'Ticket_ID',ticketId).sort((a,b)=>toDate_(a.Created_At)-toDate_(b.Created_At)).map(e=>({eventType:String(e.Event_Type),oldValue:String(e.Old_Value||''),newValue:String(e.New_Value||''),performedBy:String(e.Performed_By||''),createdAt:formatDateTime_(e.Created_At),note:String(e.Note||'')})); logPerformance_('getTicketDetail',startedAt,{rows:1}); return result;
+  const result=serializeTicket_(found.object); result.dynamicFields=maskSensitiveDynamicFields_(safeJsonParse_(found.object.Dynamic_Fields_JSON,{})); result.slaCycles=getTicketSlaCycles_(ticketId).map(serializeSlaCycle_); result.slaCycleNumber=result.slaCycles.reduce((m,c)=>Math.max(m,c.cycleNumber),0); result.reopenCount=result.slaCycles.filter(c=>c.cycleType==='REOPEN').length; result.canReopen=String(found.object.Status)===APP.STATUS.RESOLVED&&([APP.ROLES.POC,APP.ROLES.ADMIN].includes(user.role)||(user.role===APP.ROLES.SALES&&lower_(found.object.Raiser_Email)===lower_(user.email))); result.events=getMatchingRows_(APP.SHEETS.EVENTS,'Ticket_ID',ticketId).sort((a,b)=>toDate_(a.Created_At)-toDate_(b.Created_At)).map(e=>({eventType:String(e.Event_Type),oldValue:String(e.Old_Value||''),newValue:String(e.New_Value||''),performedBy:String(e.Performed_By||''),createdAt:formatDateTime_(e.Created_At),note:String(e.Note||'')})); logPerformance_('getTicketDetail',startedAt,{rows:1}); return result;
 }
 
 function getNumbers() {

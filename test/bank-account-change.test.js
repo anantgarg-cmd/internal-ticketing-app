@@ -1,0 +1,16 @@
+const assert=require('assert'),fs=require('fs'),vm=require('vm');
+const code=fs.readFileSync('Code.js','utf8'),setup=fs.readFileSync('Setup.js','utf8'),html=fs.readFileSync('Index.html','utf8');
+const ctx={console};vm.createContext(ctx);vm.runInContext(code,ctx);
+const category={Client_Type:'360',Category_Group:'Bank Account Change',Subcategory_Name:'Bank Account Change',Fields_JSON:JSON.stringify(['registered_email_id','registered_mobile_number','account_holder_name','bank_account_number','confirm_bank_account_number','ifsc_code','bank_name','bank_declaration','attachment']),Required_Fields_JSON:'[]'};
+const attachment={getBytes:()=>[1]};
+const valid={registered_email_id:'owner@example.com',registered_mobile_number:'9876543210',account_holder_name:'ABC Pvt Ltd',bank_account_number:'12345678',confirm_bank_account_number:'12345678',ifsc_code:'hdfc0001234',bank_name:'HDFC Bank',bank_declaration:'on',attachment};
+ctx.validateBankAccountChange_(valid);assert.equal(valid.ifsc_code,'HDFC0001234');
+const cases=[['registered_email_id','',/Registered Email/],['registered_mobile_number','123',/10 digits/],['bank_account_number','1234567',/8–18/],['bank_account_number','1234567890123456789',/8–18/],['bank_account_number','1234ABCD',/8–18/],['confirm_bank_account_number','87654321',/do not match/],['ifsc_code','INVALID',/valid 11-character/],['attachment',null,/cancelled cheque/],['bank_declaration','',/declaration/]];
+cases.forEach(([key,value,re])=>assert.throws(()=>ctx.validateBankAccountChange_(Object.assign({},valid,{[key]:value})),re));
+const stored=ctx.extractDynamicFields_(valid,category);assert.equal(stored.bank_account_number,'12345678');assert.equal(stored.ifsc_code,'HDFC0001234');assert.ok(!('confirm_bank_account_number' in stored));
+assert.equal(ctx.maskBankAccountNumber_('123456789012'),'********9012');assert.equal(ctx.maskSensitiveDynamicFields_({bank_account_number:'12345678'}).bank_account_number,'********5678');
+assert.match(setup,/360-BANK-ACCOUNT-CHANGE/);assert.match(setup,/Sort_Order:1/);assert.match(setup,/Bank Account Verification/);assert.match(setup,/function repairBankAccountChangeWorkflow/);
+assert.match(html,/cat\.fields\.filter\(key=>key!=='attachment'\)\.slice\(0,3\)/);assert.match(html,/renderBankAccountChangeFields/);assert.match(html,/cat\.clientType==='360'/);assert.match(html,/Upload cancelled cheque or bank passbook front page/);
+assert.match(html,/\['bank_account_number','confirm_bank_account_number','account_holder_name','ifsc_code','bank_name','bank_declaration'\]\.includes/);
+assert.doesNotMatch(code,/buildNewHighPrioritySlackPayload_[\s\S]{0,800}bank_account_number/);
+console.log('Bank account change tests passed');
