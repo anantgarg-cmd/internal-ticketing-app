@@ -48,9 +48,9 @@ const APP = Object.freeze({
 });
 
 // Version 6 is already the client-size SLA release; Slack is the next additive migration.
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 const APP_SCHEMA_VERSION_PROPERTY_ = 'APP_SCHEMA_VERSION';
-const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v10';
+const SCHEMA_READY_CACHE_KEY_ = 'app:schema-ready:v11';
 const SCHEMA_UPGRADE_IN_PROGRESS_ = 'SCHEMA_UPGRADE_IN_PROGRESS';
 const SCHEMA_TEMPORARY_MESSAGE_ = 'The application structure is being upgraded. Please refresh once after a few seconds.';
 const SCHEMA_ADMIN_MESSAGE_ = 'The application structure could not be prepared automatically. Please ask the administrator to run repairApplicationSchema() from Apps Script.';
@@ -420,11 +420,35 @@ function runSchemaMigrations_(fromVersion, toVersion, spreadsheet, summary) {
     ensure([APP.SHEETS.TICKETS, APP.SHEETS.TICKET_INDEX, APP.SHEETS.CATEGORIES]);
     report.configurationRowsSeeded.CategorySlaV10=upsertCategorySlaV10_(ss);
   }
+  if (toVersion >= 11) {
+    ensure([APP.SHEETS.CATEGORIES]);
+    report.configurationRowsSeeded.BankAccountChange=upsertBankAccountChangeCategory_(ss);
+  }
   const indexResult = backfillTicketIndexIfNeeded_(ss);
   report.ticketIndexRowsCreated += indexResult.created;
   if (!indexResult.complete) report.warnings.push('TicketIndex backfill will continue automatically.');
   return { summary: report, indexComplete: indexResult.complete };
 }
+
+const BANK_ACCOUNT_CHANGE_ID_='360-BANK-ACCOUNT-CHANGE';
+const BANK_ACCOUNT_FIELDS_=Object.freeze(['registered_email_id','registered_mobile_number','account_holder_name','bank_account_number','confirm_bank_account_number','ifsc_code','bank_name','bank_declaration','attachment']);
+const BANK_ACCOUNT_REQUIRED_=Object.freeze(['registered_email_id','account_holder_name','bank_account_number','confirm_bank_account_number','ifsc_code','bank_name','bank_declaration','attachment']);
+
+/** Additive/idempotent administrator repair. Historical rows and tickets are never removed. */
+function upsertBankAccountChangeCategory_(ss) {
+  const sheet=ss.getSheetByName(APP.SHEETS.CATEGORIES),width=sheet.getLastColumn(),headers=sheet.getRange(1,1,1,width).getDisplayValues()[0].map(String),col=name=>headers.indexOf(name);
+  const rows=sheet.getLastRow()>1?sheet.getRange(2,1,sheet.getLastRow()-1,width).getValues():[],idCol=col('Category_ID');
+  const config={Category_ID:BANK_ACCOUNT_CHANGE_ID_,Client_Type:'360',Category_Name:'Bank Account Change',Priority:'LOW',SLA_Hours:24,Fields_JSON:JSON.stringify(BANK_ACCOUNT_FIELDS_),Required_Fields_JSON:JSON.stringify(BANK_ACCOUNT_REQUIRED_),Active:true,Category_Group:'Bank Account Change',Subcategory_Name:'Bank Account Change',Visible_In_Form:true,Sort_Order:1};
+  const found=rows.findIndex(row=>String(row[idCol])===BANK_ACCOUNT_CHANGE_ID_);let added=false;
+  if(found<0){sheet.getRange(sheet.getLastRow()+1,1,1,width).setValues([headers.map(h=>config[h]===undefined?'':config[h])]);added=true;}
+  else Object.keys(config).forEach(key=>{const column=col(key);if(column>=0&&String(rows[found][column])!==String(config[key]))sheet.getRange(found+2,column+1).setValue(config[key]);});
+  // Deterministically place every other active 360 category after the dedicated workflow.
+  rows.map((row,index)=>({row,index:index+2})).filter(x=>String(x.row[col('Client_Type')])==='360'&&String(x.row[idCol])!==BANK_ACCOUNT_CHANGE_ID_&&truthy_(x.row[col('Active')])).sort((a,b)=>number_(a.row[col('Sort_Order')],9999)-number_(b.row[col('Sort_Order')],9999)||String(a.row[idCol]).localeCompare(String(b.row[idCol]))).forEach((x,index)=>{const order=index+2;if(number_(x.row[col('Sort_Order')],9999)!==order)sheet.getRange(x.index,col('Sort_Order')+1).setValue(order);});
+  return {categoryId:BANK_ACCOUNT_CHANGE_ID_,added:added,sortOrder:1,priority:'LOW',slaHours:24};
+}
+
+/** Admin-safe recovery entry point; does not invoke setupSystem. */
+function repairBankAccountChangeWorkflow(){requireRole_([APP.ROLES.ADMIN]);const lock=LockService.getScriptLock();lock.waitLock(30000);try{const result=upsertBankAccountChangeCategory_(getSpreadsheet_());invalidateSchemaCaches_();return result;}finally{lock.releaseLock();}}
 
 /** Final Sheet release snapshot. SLA days are converted generically to eight-hour working days. */
 const CATEGORY_SLA_V10_ = Object.freeze([
